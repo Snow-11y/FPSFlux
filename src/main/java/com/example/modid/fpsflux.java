@@ -1,31 +1,63 @@
 package com.lo.fpsflux;
 
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.common.event.FMLInitializationEvent;
-import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import net.minecraft.command.CommandBase;
+import net.minecraft.command.CommandException;
+import net.minecraft.command.ICommandSender;
+import net.minecraft.entity.Entity;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.util.text.TextComponentString;
 
-@Mod(
-    modid = FPSFlux.MODID,
-    name = FPSFlux.NAME,
-    version = FPSFlux.VERSION,
-    acceptableRemoteVersions = "*"
-)
-public class FPSFlux {
-    public static final String MODID = "fpsflux";
-    public static final String NAME = "FPSFlux";
-    public static final String VERSION = "0.1.0";
-    
-    public static final Logger LOGGER = LogManager.getLogger(NAME);
-    
-    @Mod.EventHandler
-    public void preInit(FMLPreInitializationEvent event) {
-        LOGGER.info("FPSFlux PreInit - Java version: {}", System.getProperty("java.version"));
+import java.util.EnumMap;
+import java.util.Map;
+
+public class CommandFPSFlux extends CommandBase {
+    @Override
+    public String getName() {
+        return "fpsflux";
     }
     
-    @Mod.EventHandler
-    public void init(FMLInitializationEvent event) {
-        LOGGER.info("FPSFlux Init - Starting culling engine");
+    @Override
+    public String getUsage(ICommandSender sender) {
+        return "/fpsflux status - Show entity culling statistics";
     }
+    
+    @Override
+    public void execute(MinecraftServer server, ICommandSender sender, String[] args) throws CommandException {
+        if (args.length == 0 || args[0].equals("status")) {
+            Map<CullingTier, Integer> counts = new EnumMap<>(CullingTier.class);
+            for (CullingTier tier : CullingTier.values()) {
+                counts.put(tier, 0);
+            }
+            
+            // Count entities per tier
+            for (Entity entity : sender.getEntityWorld().loadedEntityList) {
+                if (entity instanceof net.minecraft.entity.EntityLiving) {
+                    CullingTier tier = CullingManager.getInstance()
+                        .calculateTier(entity, sender.getEntityWorld());
+                    counts.put(tier, counts.get(tier) + 1);
+                }
+            }
+            
+            sender.sendMessage(new TextComponentString("§6FPSFlux Entity Distribution:"));
+            sender.sendMessage(new TextComponentString(
+                String.format("§aFULL: %d  §eMINIMAL: %d  §6MODERATE: %d  §cAGGRESSIVE: %d",
+                    counts.get(CullingTier.FULL),
+                    counts.get(CullingTier.MINIMAL),
+                    counts.get(CullingTier.MODERATE),
+                    counts.get(CullingTier.AGGRESSIVE))
+            ));
+        }
+    }
+    
+    @Override
+    public int getRequiredPermissionLevel() {
+        return 0; // Anyone can use
+    }
+}
+Register command in FPSFlux.java:
+import net.minecraftforge.fml.common.event.FMLServerStartingEvent;
+
+@Mod.EventHandler
+public void serverStart(FMLServerStartingEvent event) {
+    event.registerServerCommand(new CommandFPSFlux());
 }
