@@ -57,7 +57,7 @@ Four-tier distance-based system that progressively disables entity AI, pathfindi
 **Offload texture data to disk** when not actively visible, freeing RAM for dynamic content. Intelligent prefetching prevents stutter.
 
 ### LoliASM/Chibi Integration Helpers
-Maximize the impact of existing RAM optimizations through tight integration with LoliASM's allocator improvements and Chibi's memory profiling.
+Maximize the impact of existing RAM optimizations through tight integration with LoliASM's allocator improvements and LoliAsm's memory profiling.
 
 ### Advanced Configuration System
 - **GUI-based chunk culling exceptions** - mark specific chunks to never cull (spawn areas, farms, etc.)
@@ -99,7 +99,7 @@ Import Nothirium's multi-GL version support (1.0/1.5/2.0/3.2/4.3/4.5) while main
 
 ## 🛠️ Development
 
-Built with the [CleanroomMC Template](https://github.com/CleanroomMC/ExampleMod) by Rongmario.
+Built with the [CleanroomMC Template]([https://github.com/CleanroomMC/ExampleMod](https://github.com/CleanroomMC/ForgeDevEnv)) by Rongmario.
 
 **Tech Stack:**
 - Java 25 (compiles to Java 8 bytecode via Jabel)
@@ -122,14 +122,14 @@ cd FPSFlux
 This mod stands on the shoulders of giants:
 
 ### Core Contributors
-- **LO** - Lead developer, architecture, Java 21 optimizations
+- **Snow** **Snow/snow-11y** - Author, Lead developer, architecture, Jav
 
 ### Essential Dependencies & Inspiration
 - **Rongmario** ([CleanroomMC](https://github.com/CleanroomMC), [MixinBooter](https://github.com/CleanroomMC/MixinBooter)) - Without the CleanroomMC ecosystem and the template that bootstrapped this project, FPSFlux would not exist. Special thanks for making modern Java development on 1.12.2 possible.
   
 - **Meldexun** ([Nothirium](https://github.com/Meldexun/Nothirium)) - Pioneering work on modern OpenGL rendering for legacy Minecraft versions. Future GL pipeline integration will honor Nothirium's innovations.
 
-- **embeddedt** ([Celerita](https://github.com/embeddedt/Celerita)) - The definitive Embeddium/Sodium fork for 1.12.2. Celerita compatibility is a first-class design goal.  
+- **embeddedt** ([Celerita](https://git.taumc.org/embeddedt/celeritas)) - The definitive Embeddium/Sodium fork for 1.12.2. Celerita compatibility is a first-class design goal.  
   *(Note: While kappa-maintainer hosts the GitHub page, embeddedt authored the initial release and owns the original TauMC repository.)*
 
 ---
