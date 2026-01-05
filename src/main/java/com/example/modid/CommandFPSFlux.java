@@ -51,6 +51,6 @@ public class CommandFPSFlux extends CommandBase {
     
     @Override
     public int getRequiredPermissionLevel() {
-        return 0; // Anyone can use
+        return 0; // no need for Cheats!!
     }
 }
