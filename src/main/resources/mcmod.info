@@ -6,6 +6,6 @@
 	"authorList": ["snow-11y"],
 	"credits": "snow-11y, CleanRoomMC for The template & environment",
 	"url": "https://github.com/Snow-11y/FPSFlux",
-	"updateJSON": "${mod_update_json}",
-	"logoFile": "${mod_logo_path}"
+	"updateJSON": "src/main/resources/changelog.txt",
+	"logoFile": "src/main/resources/icon.jpg"
 }]
