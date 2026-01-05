@@ -4,7 +4,7 @@
 	"mcversion": "1.12.2",
 	"description": "maximizing the benefits from cleanroom environment",
 	"authorList": ["snow-11y"],
-	"credits": "snow-11y, CleanRoomMC for The template & environment",
+	"credits": "snow-11y, Rongmario, embeddedt, Meldexun",
 	"url": "https://github.com/Snow-11y/FPSFlux",
 	"updateJSON": "src/main/resources/changelog.txt",
 	"logoFile": "src/main/resources/icon.jpg"
