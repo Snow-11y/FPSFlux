@@ -1,12 +1,11 @@
 [{
-	"modid": "${mod_id}",
-	"name": "${mod_name}",
-	"version": "${mod_version}",
+	"modid": "fpsflux"
+    "name": "FPSFlux"
 	"mcversion": "1.12.2",
-	"description": "${mod_description}",
-	"authorList": ["${mod_authors}"],
-	"credits": "${mod_credits}",
-	"url": "${mod_url}",
+	"description": "maximizing the benefits from cleanroom environment",
+	"authorList": ["snow-11y"],
+	"credits": "snow-11y, CleanRoomMC for The template & environment",
+	"url": "https://github.com/Snow-11y/FPSFlux",
 	"updateJSON": "${mod_update_json}",
 	"logoFile": "${mod_logo_path}"
 }]
