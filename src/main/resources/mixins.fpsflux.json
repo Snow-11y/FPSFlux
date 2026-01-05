@@ -1,0 +1,11 @@
+{
+  "required": true,
+  "package": "com.lo.fpsflux.mixins",
+  "refmap": "mixins.fpsflux.refmap.json",
+  "target": "@env(DEFAULT)",
+  "minVersion": "0.8.5",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "MixinEntityLiving"
+  ]
+}
