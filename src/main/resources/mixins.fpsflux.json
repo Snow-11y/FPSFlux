@@ -1,6 +1,6 @@
 {
   "required": true,
-  "package": "com.lo.fpsflux.mixins",
+  "package": "com.example.modid.mixins",
   "refmap": "mixins.fpsflux.refmap.json",
   "target": "@env(DEFAULT)",
   "minVersion": "0.8.5",
