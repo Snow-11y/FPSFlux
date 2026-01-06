@@ -1,4 +1,4 @@
-package com.lo.fpsflux;
+package com.example.modid;
 
 import net.minecraft.command.CommandBase;
 import net.minecraft.command.CommandException;
