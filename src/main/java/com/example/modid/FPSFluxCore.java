@@ -1,4 +1,4 @@
-package com.lo.fpsflux;
+package com.example.modid;
 
 import net.minecraftforge.fml.relauncher.IFMLLoadingPlugin;
 import zone.rong.mixinbooter.IEarlyMixinLoader;
