@@ -2,7 +2,7 @@
 
 **The definitive performance optimization mod for Minecraft 1.12.2, built on modern foundations.**
 ![FPSFlux Icon](src/main/resources/icon.jpg)
-[![Java 21+](https://img.shields.io/badge/Java-21%2B-orange.svg)](https://adoptium.net/)
+[![Java 25+](https://img.shields.io/badge/Java-25%2B-orange.svg)](https://adoptium.net/)
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.12.2-brightgreen.svg)](https://www.minecraft.net/)
 [![CleanroomMC](https://img.shields.io/badge/Powered%20by-CleanroomMC-blue.svg)](https://cleanroommc.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -112,7 +112,6 @@ Built with the [CleanroomMC Template]([https://github.com/CleanroomMC/ExampleMod
 git clone https://github.com/Snow-11y/FPSFlux.git
 cd FPSFlux
 ./gradlew build
-# Output: build/libs/fpsflux-<version>.jar
 
 
 ---
