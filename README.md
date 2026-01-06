@@ -72,7 +72,7 @@ Import Nothirium's multi-GL version support (1.0/1.5/2.0/3.2/4.3/4.5) while main
 
 **No more choosing between renderers.** FPSFlux will bridge both, giving you:
 - Nothirium's modern GL compatibility for cutting-edge hardware
-- Celerita's optimized rendering pipeline and shader support
+- Celerita's optimized rendering pipeline
 - Seamless fallback for older GPU architectures
 
 *Note: No code will be directly copied from Nothirium - only feature parity through clean-room implementation respecting original licenses.*
