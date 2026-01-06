@@ -1,4 +1,4 @@
-package com.lo.fpsflux;
+package com.example.modid;
 
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.EntityPlayer;
