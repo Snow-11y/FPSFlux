@@ -121,7 +121,7 @@ cd FPSFlux
 This mod stands on the shoulders of giants:
 
 ### Core Contributors
-- **Snow** **Snow/snow-11y** - Author, Lead developer, architecture, Jav
+- **Snow** **Snow/snow-11y** - Author, Lead developer
 
 ### Essential Dependencies & Inspiration
 - **Rongmario** ([CleanroomMC](https://github.com/CleanroomMC), [MixinBooter](https://github.com/CleanroomMC/MixinBooter)) - Without the CleanroomMC ecosystem and the template that bootstrapped this project, FPSFlux would not exist. Special thanks for making modern Java development on 1.12.2 possible.
