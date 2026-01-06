@@ -1,4 +1,4 @@
-package com.lo.fpsflux.mixins;
+package com.example.modid.mixins;
 
 import com.lo.fpsflux.CullingManager;
 import com.lo.fpsflux.CullingTier;
