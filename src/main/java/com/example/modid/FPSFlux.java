@@ -1,4 +1,4 @@
-package com.lo.fpsflux;
+package com.example.modid;
 
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
