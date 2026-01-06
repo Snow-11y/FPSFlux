@@ -1,4 +1,4 @@
-package com.lo.fpsflux;
+package com.example.modid;
 
 public enum CullingTier {
     FULL(0, 32 * 32),           // 0-32 blocks squared
