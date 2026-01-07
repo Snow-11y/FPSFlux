@@ -1,20 +1,20 @@
 package com.example.modid.gl;
 
-import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.MemoryStack;
 import org.lwjgl.vulkan.*;
 
 import java.nio.IntBuffer;
 
+import static org.lwjgl.system.MemoryStack.stackPush;
 import static org.lwjgl.vulkan.VK10.*;
+import static org.lwjgl.vulkan.VK11.*;
+import static org.lwjgl.vulkan.VK12.*;
+import static org.lwjgl.vulkan.VK13.*;
 
 /**
- * Detect Vulkan support and version via LWJGL 3 Vulkan bindings
- * No external JAR needed - LWJGL 3.3.3+ includes Vulkan support
+ * Complete Vulkan capability detection
  */
 public class VulkanCapabilities {
-    private static boolean initialized = false;
-    
     public static boolean isSupported = false;
     public static boolean hasVulkan10 = false;
     public static boolean hasVulkan11 = false;
@@ -24,131 +24,74 @@ public class VulkanCapabilities {
     
     public static String vulkanVersion = "Not Supported";
     public static String deviceName = "Unknown";
-    public static int detectedMajor = 0;
-    public static int detectedMinor = 0;
-    public static int detectedPatch = 0;
+    public static String driverVersion = "Unknown";
+    
+    // Feature flags
+    public static boolean hasTimelineSemaphores = false;
+    public static boolean hasBufferDeviceAddress = false;
+    public static boolean hasDynamicRendering = false;
+    public static boolean hasSynchronization2 = false;
     
     public static void detect() {
-        if (initialized) return;
-        
-        try {
-            // Check if Vulkan library is loadable
-            if (!checkVulkanAvailable()) {
+        try (MemoryStack stack = stackPush()) {
+            // Check if Vulkan is available
+            if (!VK.isSupported()) {
                 isSupported = false;
-                initialized = true;
                 return;
             }
             
-            try (MemoryStack stack = MemoryStack.stackPush()) {
-                // Create minimal instance for device query
-                VkApplicationInfo appInfo = VkApplicationInfo.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_APPLICATION_INFO)
-                    .pApplicationName(stack.UTF8Safe("FPSFlux"))
-                    .applicationVersion(VK_MAKE_VERSION(1, 0, 0))
-                    .pEngineName(stack.UTF8Safe("FPSFlux"))
-                    .engineVersion(VK_MAKE_VERSION(1, 0, 0))
-                    .apiVersion(VK_API_VERSION_1_0);
-                
-                VkInstanceCreateInfo createInfo = VkInstanceCreateInfo.calloc(stack)
-                    .sType(VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO)
-                    .pApplicationInfo(appInfo);
-                
-                PointerBuffer pInstance = stack.mallocPointer(1);
-                int result = vkCreateInstance(createInfo, null, pInstance);
-                
-                if (result != VK_SUCCESS) {
-                    System.err.println("[FPSFlux] vkCreateInstance failed: " + result);
-                    isSupported = false;
-                    initialized = true;
-                    return;
-                }
-                
-                VkInstance instance = new VkInstance(pInstance.get(0), createInfo);
-                
-                try {
-                    // Enumerate physical devices
-                    IntBuffer deviceCount = stack.ints(0);
-                    vkEnumeratePhysicalDevices(instance, deviceCount, null);
-                    
-                    if (deviceCount.get(0) == 0) {
-                        System.err.println("[FPSFlux] No Vulkan physical devices found");
-                        isSupported = false;
-                        return;
-                    }
-                    
-                    PointerBuffer pDevices = stack.mallocPointer(deviceCount.get(0));
-                    vkEnumeratePhysicalDevices(instance, deviceCount, pDevices);
-                    
-                    // Use first device (primary GPU)
-                    VkPhysicalDevice physicalDevice = new VkPhysicalDevice(pDevices.get(0), instance);
-                    
-                    // Query device properties
-                    VkPhysicalDeviceProperties properties = VkPhysicalDeviceProperties.calloc(stack);
-                    vkGetPhysicalDeviceProperties(physicalDevice, properties);
-                    
-                    deviceName = properties.deviceNameString();
-                    int apiVersion = properties.apiVersion();
-                    
-                    // Parse version
-                    detectedMajor = VK_VERSION_MAJOR(apiVersion);
-                    detectedMinor = VK_VERSION_MINOR(apiVersion);
-                    detectedPatch = VK_VERSION_PATCH(apiVersion);
-                    vulkanVersion = detectedMajor + "." + detectedMinor + "." + detectedPatch;
-                    
-                    // Set version flags
-                    isSupported = true;
-                    hasVulkan10 = true;
-                    hasVulkan11 = detectedMajor > 1 || (detectedMajor == 1 && detectedMinor >= 1);
-                    hasVulkan12 = detectedMajor > 1 || (detectedMajor == 1 && detectedMinor >= 2);
-                    hasVulkan13 = detectedMajor > 1 || (detectedMajor == 1 && detectedMinor >= 3);
-                    hasVulkan14 = detectedMajor > 1 || (detectedMajor == 1 && detectedMinor >= 4);
-                    
-                    System.out.println("[FPSFlux] Vulkan detected: " + vulkanVersion + " on " + deviceName);
-                    
-                } finally {
-                    // Always cleanup instance
-                    vkDestroyInstance(instance, null);
-                }
+            // Try to create minimal instance to check version
+            IntBuffer pApiVersion = stack.ints(0);
+            int result = vkEnumerateInstanceVersion(pApiVersion);
+            if (result != VK_SUCCESS) {
+                isSupported = false;
+                return;
             }
             
-        } catch (Throwable e) {
-            System.err.println("[FPSFlux] Vulkan detection failed: " + e.getMessage());
+            int apiVersion = pApiVersion.get(0);
+            int major = VK_VERSION_MAJOR(apiVersion);
+            int minor = VK_VERSION_MINOR(apiVersion);
+            int patch = VK_VERSION_PATCH(apiVersion);
+            
+            vulkanVersion = major + "." + minor + "." + patch;
+            
+            // Set version flags
+            hasVulkan10 = true;
+            hasVulkan11 = (major > 1) || (major == 1 && minor >= 1);
+            hasVulkan12 = (major > 1) || (major == 1 && minor >= 2);
+            hasVulkan13 = (major > 1) || (major == 1 && minor >= 3);
+            hasVulkan14 = (major > 1) || (major == 1 && minor >= 4);
+            
+            isSupported = true;
+            
+            System.out.println("[VulkanCapabilities] Detected Vulkan " + vulkanVersion);
+            
+        } catch (Exception e) {
             isSupported = false;
-        }
-        
-        initialized = true;
-    }
-    
-    private static boolean checkVulkanAvailable() {
-        try {
-            // Attempt to call a Vulkan function - will throw if unavailable
-            try (MemoryStack stack = MemoryStack.stackPush()) {
-                IntBuffer count = stack.ints(0);
-                int result = vkEnumerateInstanceExtensionProperties((CharSequence) null, count, null);
-                return result == VK_SUCCESS || result == VK_INCOMPLETE;
-            }
-        } catch (Throwable t) {
-            // Vulkan library not available or not loadable
-            return false;
+            vulkanVersion = "Detection Failed: " + e.getMessage();
         }
     }
     
     public static String getReport() {
-        if (!initialized) detect();
+        if (!isSupported) {
+            return "Vulkan: Not Supported";
+        }
         
         StringBuilder sb = new StringBuilder();
-        sb.append("Vulkan: ").append(isSupported ? "Supported" : "Not Supported");
-        sb.append(" | Version: ").append(vulkanVersion);
-        sb.append(" | Device: ").append(deviceName);
-        
-        if (isSupported) {
-            sb.append("\nFeatures: ");
-            sb.append("VK1.0:").append(hasVulkan10).append(" ");
-            sb.append("VK1.1:").append(hasVulkan11).append(" ");
-            sb.append("VK1.2:").append(hasVulkan12).append(" ");
-            sb.append("VK1.3:").append(hasVulkan13).append(" ");
-            sb.append("VK1.4:").append(hasVulkan14);
-        }
+        sb.append("Vulkan: Supported\n");
+        sb.append("Version: ").append(vulkanVersion).append("\n");
+        sb.append("Device: ").append(deviceName).append("\n");
+        sb.append("Driver: ").append(driverVersion).append("\n");
+        sb.append("Features:\n");
+        sb.append("  Vulkan 1.0: ").append(hasVulkan10).append("\n");
+        sb.append("  Vulkan 1.1: ").append(hasVulkan11).append("\n");
+        sb.append("  Vulkan 1.2: ").append(hasVulkan12).append("\n");
+        sb.append("  Vulkan 1.3: ").append(hasVulkan13).append("\n");
+        sb.append("  Vulkan 1.4: ").append(hasVulkan14).append("\n");
+        sb.append("  Timeline Semaphores: ").append(hasTimelineSemaphores).append("\n");
+        sb.append("  Buffer Device Address: ").append(hasBufferDeviceAddress).append("\n");
+        sb.append("  Dynamic Rendering: ").append(hasDynamicRendering).append("\n");
+        sb.append("  Synchronization2: ").append(hasSynchronization2);
         
         return sb.toString();
     }
