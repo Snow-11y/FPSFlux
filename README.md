@@ -9,9 +9,17 @@
 <img src="https://media.giphy.com/media/l0HlPwMAzh13pcZ20/giphy.gif" width="100%" height="6"/>
 
 <!-- Triple RGB Animated Typing -->
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=900&size=40&duration=800&pause=100&color=FF6B6B&center=true&vCenter=true&multiline=false&repeat=true&width=900&height=55&lines=✨+JAVA+25+MATH+ACCELERATION+✨" alt="Java" />
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=900&size=40&duration=800&pause=100&color=A78BFA&center=true&vCenter=true&multiline=false&repeat=true&width=900&height=55&lines=✨+OPENGL+1.5+→+4.6+BACKEND+✨" alt="OpenGL" />
-<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=900&size=40&duration=800&pause=100&color=51CF66&center=true&vCenter=true&multiline=false&repeat=true&width=900&height=55&lines=✨+VULKAN+1.0+→+1.4+RENDERER+✨" alt="Vulkan" />
+<p align="center">
+  <img src="https://img.shields.io/badge/Java-ED8B00?logo=openjdk&logoColor=white" height="40" alt="Java" />
+  <img src="https://img.shields.io/badge/OpenGL-5586A4?logo=opengl&logoColor=white" height="40" alt="OpenGL" />
+  <img src="https://img.shields.io/badge/Vulkan-AC162C?logo=vulkan&logoColor=white" height="40" alt="Vulkan" />
+</p>
+
+![Java Animation](https://readme-typing-svg.demolab.com?font=Fira+Code&weight=900&size=40&duration=800&pause=100&color=FF6B6B&center=true&vCenter=true&multiline=false&repeat=true&width=900&height=55&lines=✨+JAVA+25+MATH+ACCELERATION+✨)
+
+![OpenGL Animation](https://readme-typing-svg.demolab.com?font=Fira+Code&weight=900&size=40&duration=800&pause=100&color=A78BFA&center=true&vCenter=true&multiline=false&repeat=true&width=900&height=55&lines=✨+OPENGL+1.5+→+4.6+BACKEND+✨)
+
+![Vulkan Animation](https://readme-typing-svg.demolab.com?font=Fira+Code&weight=900&size=40&duration=800&pause=100&color=51CF66&center=true&vCenter=true&multiline=false&repeat=true&width=900&height=55&lines=✨+VULKAN+1.0+→+1.4+RENDERER+✨)
 
 <!-- RGB Neon Glow Line -->
 <img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%"/>
@@ -277,6 +285,7 @@ any mod:      ✅ 99% compatible
 | Java 25 | ✅ latest |
 | Math Accel | ✅ yes |
 | 120+ Opts | ✅ yes |
+| stability | ✅ 99% compatibility, all renders compats, phones, pcs, shaders |
 
 </td>
 </tr>
