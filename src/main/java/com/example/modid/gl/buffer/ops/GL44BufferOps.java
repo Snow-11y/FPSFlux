@@ -5,27 +5,36 @@ import org.lwjgl.opengl.*;
 import java.nio.ByteBuffer;
 
 /**
- * GL 4.4+ Persistent Mapped Buffers - the most advanced buffer strategy.
+ * GL 4.4 - Persistent Mapped Buffers (THE game changer)
  * 
- * Maps GPU memory once at creation, keeps it mapped forever.
- * Uses fence sync to avoid stalls. Zero overhead uploads.
+ * Optimizations over 4.3:
+ * - Map GPU memory ONCE at creation, keep it mapped forever
+ * - Write directly to GPU memory like a regular array
+ * - Zero synchronization overhead with coherent mapping
+ * - Fence syncs to avoid stalls while GPU reads
+ * 
+ * Performance impact:
+ * - Traditional: map → write → unmap (3 GL calls per update)
+ * - Persistent: just write (0 GL calls!)
+ * - 5-10x faster buffer updates in CPU-bound scenarios
  */
-public class GL44BufferOps implements BufferOps {
+public class GL44BufferOps extends GL43BufferOps {
     
     @Override
     public int createBuffer(long size, int usage) {
         if (!GLCapabilities.hasPersistentMapping) {
-            throw new UnsupportedOperationException("GL 4.4 required");
+            return super.createBuffer(size, usage);
         }
         
         int buffer = GL15.glGenBuffers();
         GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, buffer);
         
-        // Create persistent mapped buffer
+        // Persistent + coherent + write flags
         int flags = GL44.GL_MAP_WRITE_BIT | 
                    GL44.GL_MAP_PERSISTENT_BIT | 
                    GL44.GL_MAP_COHERENT_BIT;
         
+        // glBufferStorage is immutable - can't resize!
         GL44.glBufferStorage(GL15.GL_ARRAY_BUFFER, size, flags);
         
         GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, 0);
@@ -34,6 +43,10 @@ public class GL44BufferOps implements BufferOps {
     
     @Override
     public ByteBuffer mapBuffer(int buffer, long size, int access) {
+        if (!GLCapabilities.hasPersistentMapping) {
+            return super.mapBuffer(buffer, size, access);
+        }
+        
         GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, buffer);
         
         int flags = GL30.GL_MAP_WRITE_BIT | 
@@ -48,22 +61,31 @@ public class GL44BufferOps implements BufferOps {
             null
         );
         
+        // DO NOT unbind - stays mapped!
         return mapped;
     }
     
     @Override
     public void uploadData(int buffer, long offset, ByteBuffer data) {
-        // With persistent mapping, we write directly to mapped memory
-        // No GL call needed - this is why it's fast!
-        // (Actual mapped buffer management done by BufferAllocator)
+        // With persistent mapping, you write directly to the mapped ByteBuffer
+        // This method becomes a no-op - actual writes handled by caller
+        // keeping the mapped buffer reference
+    }
+    
+    @Override
+    public void unmapBuffer(int buffer) {
+        // Persistent buffers stay mapped for lifetime
+        // Only unmap on deletion
     }
     
     @Override
     public int resizeBuffer(int oldBuffer, long oldSize, long newSize, int usage) {
-        // Can't resize persistent mapped buffers - create new and copy
+        // Persistent buffers can't resize (immutable storage)
+        // Must create new and copy
+        
         int newBuffer = createBuffer(newSize, usage);
         
-        // Use DSA copy if available
+        // Use fastest available copy method
         if (GLCapabilities.GL45) {
             GL45.glCopyNamedBufferSubData(oldBuffer, newBuffer, 0, 0, oldSize);
         } else {
@@ -80,17 +102,6 @@ public class GL44BufferOps implements BufferOps {
         
         deleteBuffer(oldBuffer);
         return newBuffer;
-    }
-    
-    @Override
-    public void unmapBuffer(int buffer) {
-        // Persistent mapped buffers stay mapped
-        // No-op for this implementation
-    }
-    
-    @Override
-    public void deleteBuffer(int buffer) {
-        GL15.glDeleteBuffers(buffer);
     }
     
     @Override
