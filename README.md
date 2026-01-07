@@ -13,7 +13,7 @@
 
 ## What Makes FPSFlux Different?
 
-**Every other performance mod is stuck in 2018.** They run on Java 8, legacy OpenGL, and outdated optimization techniques. FPSFlux rewrites the rules by leveraging:
+**most performance mods is stuck in 2018.** They-all run on Java 8, legacy OpenGL, and outdated optimization techniques. FPSFlux rewrites the rules by leveraging:
 
 - **Java 21 Mathematics** - `Math.fma()` chains, vector intrinsics, and SIMD optimizations for distance calculations that leave Java 8 implementations in the dust
 - **CleanroomMC Foundation** - Access to modern Java APIs, LWJGL3, and cutting-edge JVM features while maintaining 1.12.2 compatibility
