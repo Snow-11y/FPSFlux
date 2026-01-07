@@ -237,12 +237,13 @@ any mod:      ✅ 99% compatible
 
 | feature | status |
 |:---|:---:|
-| GL 1.5→4.5 | ⚠️ incomplete |
+| GL 1.5→4.3 | ⚠️ incomplete, not all GL presents, not fully optimized |
 | GL 4.6 | ❌ missing |
 | GLES | ❌ none |
 | Vulkan | ❌ none |
 | Java | 8 (ancient) |
 | Math Accel | ❌ none |
+| stability | ⚠️ there's no optimizations for compatible devices or not, if your gpu isn't supported, instantly crash, no fallbacks, some devices are incapable to even run it |
 
 </td>
 <td width="33%" align="center">
@@ -255,10 +256,11 @@ any mod:      ✅ 99% compatible
 |:---|:---:|
 | OpenGL | ❌ none |
 | GLES | ❌ none |
-| VK 1.0→1.2 | ⚠️ outdated |
+| VK 1.0→1.2 | ⚠️ outdated, only 1.2 |
 | VK 1.3→1.4 | ❌ missing |
 | Java | 17 (old) |
 | GL Fallback | ❌ none |
+| stability | ⚠️ the mod is highly risky, the author himself said it in the github repo |
 
 </td>
 <td width="33%" align="center">
@@ -2635,3 +2637,4 @@ end:
 <td><b>4</b></td>
 <td><img src="https://img.shields.io/badge/-%E2%9C%93-51cf66?style=flat-square"/></td>
 </tr>
+    
