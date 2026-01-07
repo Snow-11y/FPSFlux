@@ -1326,3 +1326,12 @@ public class VulkanManager {
         }
     }
 }
+
+public long getCurrentSwapchainImage() {
+    return swapchainImages[currentImageIndex];
+}
+
+public boolean supportsAnisotropy() {
+    // Check if anisotropy is supported during device creation
+    return physicalDeviceFeatures.samplerAnisotropy();
+}
