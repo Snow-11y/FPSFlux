@@ -1,8 +1,5 @@
 package com.example.modid.gl;
 
-import net.minecraft.client.Minecraft;
-import net.minecraft.util.text.TextComponentString;
-import net.minecraft.util.text.TextFormatting;
 import org.lwjgl.opengl.*;
 
 public class GLCapabilities {
@@ -20,6 +17,13 @@ public class GLCapabilities {
     public static boolean GL44 = false;
     public static boolean GL45 = false;
     public static boolean GL46 = false;
+    
+    // OpenGL ES support (for gl4es/mobile/ANGLE)
+    public static boolean isGLES = false;
+    public static boolean hasGLES20 = false;
+    public static boolean hasGLES30 = false;
+    public static boolean hasGLES31 = false;
+    public static boolean hasGLES32 = false;
     
     // Feature flags
     public static boolean hasVBO = false;
@@ -52,10 +56,10 @@ public class GLCapabilities {
         if (initialized) return;
         
         try {
-            // FIX #1: LWJGL 3 uses GL.getCapabilities() instead of GLContext.getCapabilities()
+            // LWJGL 3 uses GL.getCapabilities()
             org.lwjgl.opengl.GLCapabilities caps = GL.getCapabilities();
             
-            // FIX #5: Thread guard - verify we have a valid context
+            // Thread guard - verify we have a valid context
             if (caps == null || !caps.OpenGL11) {
                 System.err.println("[FPSFlux] No valid GL context available");
                 return;
@@ -69,6 +73,9 @@ public class GLCapabilities {
             // Detect GL wrappers
             detectWrapper();
             
+            // Detect GLES context
+            detectGLES();
+            
             // Parse version
             parseVersion(glVersion);
             
@@ -77,6 +84,14 @@ public class GLCapabilities {
                 detectVersionsConservative(caps);
             } else {
                 detectVersionsNative(caps);
+            }
+            
+            // Update GLES flags based on detected GL versions (for gl4es)
+            if (wrapperName.equals("gl4es") && !isGLES) {
+                hasGLES20 = true; // gl4es minimum
+                hasGLES30 = GL30;
+                hasGLES31 = GL31 && caps.GL_ARB_compute_shader;
+                hasGLES32 = GL33 && caps.GL_ARB_tessellation_shader;
             }
             
             // Feature detection
@@ -148,7 +163,33 @@ public class GLCapabilities {
         wrapperName = "Native";
     }
     
-    // FIX #4: More robust version parsing with regex
+    private static void detectGLES() {
+        String versionLower = glVersion.toLowerCase();
+        
+        // Check if running on OpenGL ES context
+        if (versionLower.contains("opengl es") || versionLower.contains("opengl_es")) {
+            isGLES = true;
+            
+            // Parse ES version from string like "OpenGL ES 3.2"
+            java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("opengl\\s*es\\s*(\\d+)\\.(\\d+)", java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(glVersion);
+            
+            if (matcher.find()) {
+                int esMajor = Integer.parseInt(matcher.group(1));
+                int esMinor = Integer.parseInt(matcher.group(2));
+                
+                hasGLES20 = esMajor >= 2;
+                hasGLES30 = esMajor >= 3;
+                hasGLES31 = esMajor > 3 || (esMajor == 3 && esMinor >= 1);
+                hasGLES32 = esMajor > 3 || (esMajor == 3 && esMinor >= 2);
+            } else {
+                // Fallback: assume ES 2.0 minimum
+                hasGLES20 = true;
+            }
+        }
+    }
+    
     private static void parseVersion(String version) {
         try {
             // Regex to extract major.minor from various formats:
@@ -173,7 +214,6 @@ public class GLCapabilities {
         }
     }
     
-    // FIX #1: Updated for LWJGL 3 GLCapabilities
     private static void detectVersionsNative(org.lwjgl.opengl.GLCapabilities caps) {
         // Native GPU - trust reported versions
         GL15 = detectedMajor > 1 || (detectedMajor == 1 && detectedMinor >= 5);
@@ -189,7 +229,6 @@ public class GLCapabilities {
         GL46 = detectedMajor > 4 || (detectedMajor == 4 && detectedMinor >= 6);
     }
     
-    // FIX #1: Updated for LWJGL 3 GLCapabilities
     private static void detectVersionsConservative(org.lwjgl.opengl.GLCapabilities caps) {
         // Wrapper detected - verify each feature individually
         // Don't trust version string, test actual capabilities
@@ -264,9 +303,8 @@ public class GLCapabilities {
                 caps.GL_ARB_polygon_offset_clamp) || caps.OpenGL46;
     }
     
-    // FIX #1: Updated for LWJGL 3 GLCapabilities
     private static void detectFeatures(org.lwjgl.opengl.GLCapabilities caps) {
-        // FIX #2: VBO is guaranteed in GL 1.5+, no need to double-check extension
+        // VBO is guaranteed in GL 1.5+
         hasVBO = GL15;
         hasVAO = GL30 && caps.GL_ARB_vertex_array_object;
         hasInstancing = GL33 && caps.GL_ARB_instanced_arrays;
@@ -299,7 +337,7 @@ public class GLCapabilities {
     
     private static void queryLimits() {
         try {
-            // FIX #3: Use GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS for modern rendering
+            // Use GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS for modern rendering
             if (GL20) {
                 maxTextureUnits = GL11.glGetInteger(GL20.GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS);
             } else {
@@ -327,7 +365,11 @@ public class GLCapabilities {
         sb.append("Renderer: ").append(glRenderer).append("\n");
         sb.append("Vendor: ").append(glVendor).append("\n");
         sb.append("Wrapper: ").append(wrapperName).append("\n");
-        sb.append("Detected: GL ").append(detectedMajor).append(".").append(detectedMinor).append("\n");
+        sb.append("Detected: GL ").append(detectedMajor).append(".").append(detectedMinor);
+        if (isGLES) {
+            sb.append(" (ES Mode)");
+        }
+        sb.append("\n");
         sb.append("Features: ");
         sb.append("VBO:").append(hasVBO).append(" ");
         sb.append("VAO:").append(hasVAO).append(" ");
@@ -335,6 +377,13 @@ public class GLCapabilities {
         sb.append("DSA:").append(hasDSA).append(" ");
         sb.append("PersistentMap:").append(hasPersistentMapping).append(" ");
         sb.append("MultiDrawIndirect:").append(hasMultiDrawIndirect);
+        if (isGLES || wrapperName.equals("gl4es")) {
+            sb.append("\nGLES: ");
+            sb.append("ES2.0:").append(hasGLES20).append(" ");
+            sb.append("ES3.0:").append(hasGLES30).append(" ");
+            sb.append("ES3.1:").append(hasGLES31).append(" ");
+            sb.append("ES3.2:").append(hasGLES32);
+        }
         
         return sb.toString();
     }
@@ -354,5 +403,15 @@ public class GLCapabilities {
         if (GL20) return 20;
         if (GL15) return 15;
         return 11; // Absolute minimum
+    }
+    
+    public static int getMaxSupportedGLESVersion() {
+        if (!initialized) detect();
+        
+        if (hasGLES32) return 32;
+        if (hasGLES31) return 31;
+        if (hasGLES30) return 30;
+        if (hasGLES20) return 20;
+        return 0; // No GLES
     }
 }
