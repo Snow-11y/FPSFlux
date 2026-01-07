@@ -154,7 +154,3 @@ Found a crash? Have an idea? [Open an issue](https://github.com/Snow-11y/FPSFlux
 **This is a work-in-progress alpha.** Expect rough edges, crashes, and incomplete features. Feedback welcome - this mod improves through real-world testing.
 
 **Current Status:** Entity culling functional, chunk caching in development, GL pipeline planned few days or weeks.
-
----
-
-*"Performance optimization isn't about doing less work - it's about doing smarter work."*
