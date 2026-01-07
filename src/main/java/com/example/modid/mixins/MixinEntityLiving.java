@@ -1,7 +1,7 @@
 package com.example.modid.mixins;
 
-import com.lo.fpsflux.CullingManager;
-import com.lo.fpsflux.CullingTier;
+import com.example.modid.CullingManager;
+import com.example.modid.CullingTier;
 import net.minecraft.entity.EntityLiving;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
