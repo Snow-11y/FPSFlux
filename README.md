@@ -686,12 +686,12 @@ try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
 - java 25 experimental feature
 - **mod handles this automatically** — no JVM flags needed
 - detects Java 25 → enables compact headers at runtime
-- ~8 bytes saved per object
+- ~4 bytes saved per object
 
 **impact:**
-- 1000 entities: save ~8 KB
-- 10,000 entities: save ~80 KB
-- 100,000 objects total: save ~800 KB
+- 1000 entities: save ~4 KB
+- 10,000 entities: save ~40 KB
+- 100,000 objects total: save ~400 KB
 
 **objects affected:**
 - all entity instances
