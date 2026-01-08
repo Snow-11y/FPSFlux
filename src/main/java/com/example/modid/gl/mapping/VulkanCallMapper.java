@@ -1952,6 +1952,1302 @@ public static void copyTexImage2D(int target, int level, int internalFormat,
 }
 
 // ========================================================================
+// GPU-SIDE EXECUTION (add to VulkanCallMapperX.java)
+// ========================================================================
+
+// Additional imports needed
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+
+// ========================================================================
+// GPU COMMAND EXECUTION SYSTEM
+// ========================================================================
+
+// Command types for deferred execution
+private static enum CommandType {
+    DRAW_ARRAYS,
+    DRAW_ELEMENTS,
+    DRAW_ARRAYS_INSTANCED,
+    DRAW_ELEMENTS_INSTANCED,
+    DISPATCH_COMPUTE,
+    COPY_BUFFER,
+    COPY_IMAGE,
+    BLIT_IMAGE,
+    CLEAR_COLOR,
+    CLEAR_DEPTH,
+    MEMORY_BARRIER,
+    PUSH_CONSTANTS
+}
+
+// Deferred command structure
+private static class GPUCommand {
+    CommandType type;
+    int mode;
+    int first;
+    int count;
+    int instanceCount;
+    int baseInstance;
+    int indexType;
+    long indices;
+    long srcBuffer;
+    long dstBuffer;
+    long srcImage;
+    long dstImage;
+    int srcOffsetX, srcOffsetY, srcOffsetZ;
+    int dstOffsetX, dstOffsetY, dstOffsetZ;
+    int width, height, depth;
+    float[] clearColor;
+    float clearDepth;
+    int clearStencil;
+    long pipeline;
+    long descriptorSet;
+    long[] vertexBuffers;
+    long[] vertexOffsets;
+    long indexBuffer;
+    long indexOffset;
+    byte[] pushConstantData;
+    int pushConstantOffset;
+    int pushConstantStageFlags;
+    int groupCountX, groupCountY, groupCountZ;
+}
+
+// Command queue for batching
+private static final ConcurrentLinkedQueue<GPUCommand> commandQueue = new ConcurrentLinkedQueue<>();
+private static final int MAX_COMMANDS_PER_BATCH = 1024;
+private static final AtomicBoolean gpuBusy = new AtomicBoolean(false);
+private static final AtomicLong frameNumber = new AtomicLong(0);
+
+// Multiple command buffers for parallel recording
+private static final int NUM_COMMAND_BUFFERS = 3;
+private static VkCommandBuffer[] commandBuffers;
+private static long[] commandBufferFences;
+private static int currentCommandBufferIndex = 0;
+
+// Secondary command buffers for parallel recording
+private static final int NUM_SECONDARY_BUFFERS = 8;
+private static VkCommandBuffer[] secondaryCommandBuffers;
+private static final AtomicBoolean[] secondaryBufferInUse = new AtomicBoolean[NUM_SECONDARY_BUFFERS];
+
+// GPU timeline semaphore for synchronization (Vulkan 1.2+)
+private static long timelineSemaphore = VK_NULL_HANDLE;
+private static final AtomicLong timelineValue = new AtomicLong(0);
+
+// ========================================================================
+// INITIALIZATION
+// ========================================================================
+
+/**
+ * Initialize GPU execution system
+ */
+private static void initializeGPUExecution() {
+    // Create command buffers
+    commandBuffers = new VkCommandBuffer[NUM_COMMAND_BUFFERS];
+    commandBufferFences = new long[NUM_COMMAND_BUFFERS];
+    
+    VkCommandBufferAllocateInfo allocInfo = VkCommandBufferAllocateInfo.calloc()
+        .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
+        .commandPool(ctx.commandPool)
+        .level(VK_COMMAND_BUFFER_LEVEL_PRIMARY)
+        .commandBufferCount(NUM_COMMAND_BUFFERS);
+    
+    PointerBuffer pCommandBuffers = PointerBuffer.allocateDirect(NUM_COMMAND_BUFFERS);
+    vkAllocateCommandBuffers(ctx.device, allocInfo, pCommandBuffers);
+    
+    for (int i = 0; i < NUM_COMMAND_BUFFERS; i++) {
+        commandBuffers[i] = new VkCommandBuffer(pCommandBuffers.get(i), ctx.device);
+        
+        // Create fence for each command buffer
+        VkFenceCreateInfo fenceInfo = VkFenceCreateInfo.calloc()
+            .sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO)
+            .flags(VK_FENCE_CREATE_SIGNALED_BIT);
+        
+        LongBuffer pFence = LongBuffer.allocate(1);
+        vkCreateFence(ctx.device, fenceInfo, null, pFence);
+        commandBufferFences[i] = pFence.get(0);
+        
+        fenceInfo.free();
+    }
+    
+    allocInfo.free();
+    
+    // Create secondary command buffers for parallel recording
+    secondaryCommandBuffers = new VkCommandBuffer[NUM_SECONDARY_BUFFERS];
+    
+    VkCommandBufferAllocateInfo secondaryAllocInfo = VkCommandBufferAllocateInfo.calloc()
+        .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO)
+        .commandPool(ctx.commandPool)
+        .level(VK_COMMAND_BUFFER_LEVEL_SECONDARY)
+        .commandBufferCount(NUM_SECONDARY_BUFFERS);
+    
+    PointerBuffer pSecondaryBuffers = PointerBuffer.allocateDirect(NUM_SECONDARY_BUFFERS);
+    vkAllocateCommandBuffers(ctx.device, secondaryAllocInfo, pSecondaryBuffers);
+    
+    for (int i = 0; i < NUM_SECONDARY_BUFFERS; i++) {
+        secondaryCommandBuffers[i] = new VkCommandBuffer(pSecondaryBuffers.get(i), ctx.device);
+        secondaryBufferInUse[i] = new AtomicBoolean(false);
+    }
+    
+    secondaryAllocInfo.free();
+    
+    // Create timeline semaphore if Vulkan 1.2+ available
+    if (ctx.vulkanVersion >= VK_API_VERSION_1_2) {
+        createTimelineSemaphore();
+    }
+    
+    FPSFlux.LOGGER.info("[VulkanCallMapperX] GPU execution system initialized");
+}
+
+/**
+ * Create timeline semaphore for fine-grained synchronization
+ */
+private static void createTimelineSemaphore() {
+    VkSemaphoreTypeCreateInfo typeInfo = VkSemaphoreTypeCreateInfo.calloc()
+        .sType(VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO)
+        .semaphoreType(VK_SEMAPHORE_TYPE_TIMELINE)
+        .initialValue(0);
+    
+    VkSemaphoreCreateInfo semaphoreInfo = VkSemaphoreCreateInfo.calloc()
+        .sType(VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO)
+        .pNext(typeInfo.address());
+    
+    LongBuffer pSemaphore = LongBuffer.allocate(1);
+    int result = vkCreateSemaphore(ctx.device, semaphoreInfo, null, pSemaphore);
+    
+    if (result == VK_SUCCESS) {
+        timelineSemaphore = pSemaphore.get(0);
+        FPSFlux.LOGGER.info("[VulkanCallMapperX] Timeline semaphore created");
+    }
+    
+    typeInfo.free();
+    semaphoreInfo.free();
+}
+
+// ========================================================================
+// COMMAND RECORDING
+// ========================================================================
+
+/**
+ * Get next available command buffer
+ */
+private static VkCommandBuffer acquireCommandBuffer() {
+    int index = currentCommandBufferIndex;
+    long fence = commandBufferFences[index];
+    
+    // Wait for this command buffer to be available
+    vkWaitForFences(ctx.device, new long[]{fence}, true, Long.MAX_VALUE);
+    vkResetFences(ctx.device, new long[]{fence});
+    
+    // Reset command buffer
+    vkResetCommandBuffer(commandBuffers[index], 0);
+    
+    currentCommandBufferIndex = (currentCommandBufferIndex + 1) % NUM_COMMAND_BUFFERS;
+    
+    return commandBuffers[index];
+}
+
+/**
+ * Get a secondary command buffer for parallel recording
+ */
+private static VkCommandBuffer acquireSecondaryCommandBuffer() {
+    for (int i = 0; i < NUM_SECONDARY_BUFFERS; i++) {
+        if (secondaryBufferInUse[i].compareAndSet(false, true)) {
+            vkResetCommandBuffer(secondaryCommandBuffers[i], 0);
+            return secondaryCommandBuffers[i];
+        }
+    }
+    
+    // All buffers in use, wait for first one
+    FPSFlux.LOGGER.warn("[VulkanCallMapperX] All secondary buffers in use, blocking");
+    while (!secondaryBufferInUse[0].compareAndSet(false, true)) {
+        Thread.yield();
+    }
+    vkResetCommandBuffer(secondaryCommandBuffers[0], 0);
+    return secondaryCommandBuffers[0];
+}
+
+/**
+ * Release secondary command buffer
+ */
+private static void releaseSecondaryCommandBuffer(VkCommandBuffer buffer) {
+    for (int i = 0; i < NUM_SECONDARY_BUFFERS; i++) {
+        if (secondaryCommandBuffers[i] == buffer) {
+            secondaryBufferInUse[i].set(false);
+            return;
+        }
+    }
+}
+
+/**
+ * Begin recording secondary command buffer
+ */
+private static void beginSecondaryCommandBuffer(VkCommandBuffer cmdBuffer, long renderPass, long framebuffer) {
+    VkCommandBufferInheritanceInfo inheritanceInfo = VkCommandBufferInheritanceInfo.calloc()
+        .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO)
+        .renderPass(renderPass)
+        .subpass(0)
+        .framebuffer(framebuffer);
+    
+    VkCommandBufferBeginInfo beginInfo = VkCommandBufferBeginInfo.calloc()
+        .sType(VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO)
+        .flags(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT | 
+               VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT)
+        .pInheritanceInfo(inheritanceInfo);
+    
+    vkBeginCommandBuffer(cmdBuffer, beginInfo);
+    
+    inheritanceInfo.free();
+    beginInfo.free();
+}
+
+// ========================================================================
+// DEFERRED COMMAND EXECUTION
+// ========================================================================
+
+/**
+ * Queue a draw arrays command for deferred execution
+ */
+public static void queueDrawArrays(int mode, int first, int count) {
+    checkInitialized();
+    
+    GPUCommand cmd = new GPUCommand();
+    cmd.type = CommandType.DRAW_ARRAYS;
+    cmd.mode = mode;
+    cmd.first = first;
+    cmd.count = count;
+    cmd.instanceCount = 1;
+    cmd.pipeline = getOrCreatePipeline(mode);
+    cmd.descriptorSet = descriptorSets[currentDescriptorSetIndex];
+    
+    // Capture current vertex buffer bindings
+    long vbo = state.getBoundBuffer(0x8892); // GL_ARRAY_BUFFER
+    if (vbo != 0) {
+        VulkanState.BufferObject bufObj = state.getBuffer(vbo);
+        cmd.vertexBuffers = new long[]{bufObj.buffer};
+        cmd.vertexOffsets = new long[]{0};
+    }
+    
+    commandQueue.add(cmd);
+    
+    // Auto-flush if queue is full
+    if (commandQueue.size() >= MAX_COMMANDS_PER_BATCH) {
+        flushCommands();
+    }
+}
+
+/**
+ * Queue a draw elements command for deferred execution
+ */
+public static void queueDrawElements(int mode, int count, int type, long indices) {
+    checkInitialized();
+    
+    GPUCommand cmd = new GPUCommand();
+    cmd.type = CommandType.DRAW_ELEMENTS;
+    cmd.mode = mode;
+    cmd.count = count;
+    cmd.indexType = (type == 0x1405) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16;
+    cmd.indices = indices;
+    cmd.instanceCount = 1;
+    cmd.pipeline = getOrCreatePipeline(mode);
+    cmd.descriptorSet = descriptorSets[currentDescriptorSetIndex];
+    
+    // Capture current buffer bindings
+    long vbo = state.getBoundBuffer(0x8892);
+    if (vbo != 0) {
+        VulkanState.BufferObject bufObj = state.getBuffer(vbo);
+        cmd.vertexBuffers = new long[]{bufObj.buffer};
+        cmd.vertexOffsets = new long[]{0};
+    }
+    
+    long ibo = state.getBoundBuffer(0x8893); // GL_ELEMENT_ARRAY_BUFFER
+    if (ibo != 0) {
+        VulkanState.BufferObject bufObj = state.getBuffer(ibo);
+        cmd.indexBuffer = bufObj.buffer;
+        cmd.indexOffset = indices;
+    }
+    
+    commandQueue.add(cmd);
+    
+    if (commandQueue.size() >= MAX_COMMANDS_PER_BATCH) {
+        flushCommands();
+    }
+}
+
+/**
+ * Queue instanced draw arrays
+ */
+public static void queueDrawArraysInstanced(int mode, int first, int count, int instanceCount) {
+    checkInitialized();
+    
+    GPUCommand cmd = new GPUCommand();
+    cmd.type = CommandType.DRAW_ARRAYS_INSTANCED;
+    cmd.mode = mode;
+    cmd.first = first;
+    cmd.count = count;
+    cmd.instanceCount = instanceCount;
+    cmd.baseInstance = 0;
+    cmd.pipeline = getOrCreatePipeline(mode);
+    cmd.descriptorSet = descriptorSets[currentDescriptorSetIndex];
+    
+    long vbo = state.getBoundBuffer(0x8892);
+    if (vbo != 0) {
+        VulkanState.BufferObject bufObj = state.getBuffer(vbo);
+        cmd.vertexBuffers = new long[]{bufObj.buffer};
+        cmd.vertexOffsets = new long[]{0};
+    }
+    
+    commandQueue.add(cmd);
+    
+    if (commandQueue.size() >= MAX_COMMANDS_PER_BATCH) {
+        flushCommands();
+    }
+}
+
+/**
+ * Queue instanced draw elements
+ */
+public static void queueDrawElementsInstanced(int mode, int count, int type, long indices, int instanceCount) {
+    checkInitialized();
+    
+    GPUCommand cmd = new GPUCommand();
+    cmd.type = CommandType.DRAW_ELEMENTS_INSTANCED;
+    cmd.mode = mode;
+    cmd.count = count;
+    cmd.indexType = (type == 0x1405) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16;
+    cmd.indices = indices;
+    cmd.instanceCount = instanceCount;
+    cmd.baseInstance = 0;
+    cmd.pipeline = getOrCreatePipeline(mode);
+    cmd.descriptorSet = descriptorSets[currentDescriptorSetIndex];
+    
+    long vbo = state.getBoundBuffer(0x8892);
+    if (vbo != 0) {
+        VulkanState.BufferObject bufObj = state.getBuffer(vbo);
+        cmd.vertexBuffers = new long[]{bufObj.buffer};
+        cmd.vertexOffsets = new long[]{0};
+    }
+    
+    long ibo = state.getBoundBuffer(0x8893);
+    if (ibo != 0) {
+        VulkanState.BufferObject bufObj = state.getBuffer(ibo);
+        cmd.indexBuffer = bufObj.buffer;
+        cmd.indexOffset = indices;
+    }
+    
+    commandQueue.add(cmd);
+    
+    if (commandQueue.size() >= MAX_COMMANDS_PER_BATCH) {
+        flushCommands();
+    }
+}
+
+/**
+ * Queue compute shader dispatch
+ */
+public static void queueDispatchCompute(int groupCountX, int groupCountY, int groupCountZ) {
+    checkInitialized();
+    
+    GPUCommand cmd = new GPUCommand();
+    cmd.type = CommandType.DISPATCH_COMPUTE;
+    cmd.groupCountX = groupCountX;
+    cmd.groupCountY = groupCountY;
+    cmd.groupCountZ = groupCountZ;
+    cmd.pipeline = state.getCurrentComputePipeline();
+    cmd.descriptorSet = descriptorSets[currentDescriptorSetIndex];
+    
+    commandQueue.add(cmd);
+    
+    if (commandQueue.size() >= MAX_COMMANDS_PER_BATCH) {
+        flushCommands();
+    }
+}
+
+/**
+ * Queue buffer copy
+ */
+public static void queueCopyBuffer(long srcBuffer, long dstBuffer, long srcOffset, long dstOffset, long size) {
+    checkInitialized();
+    
+    GPUCommand cmd = new GPUCommand();
+    cmd.type = CommandType.COPY_BUFFER;
+    cmd.srcBuffer = srcBuffer;
+    cmd.dstBuffer = dstBuffer;
+    cmd.srcOffsetX = (int) srcOffset;
+    cmd.dstOffsetX = (int) dstOffset;
+    cmd.width = (int) size;
+    
+    commandQueue.add(cmd);
+}
+
+/**
+ * Queue image copy
+ */
+public static void queueCopyImage(long srcImage, long dstImage, 
+                                   int srcX, int srcY, int dstX, int dstY,
+                                   int width, int height) {
+    checkInitialized();
+    
+    GPUCommand cmd = new GPUCommand();
+    cmd.type = CommandType.COPY_IMAGE;
+    cmd.srcImage = srcImage;
+    cmd.dstImage = dstImage;
+    cmd.srcOffsetX = srcX;
+    cmd.srcOffsetY = srcY;
+    cmd.dstOffsetX = dstX;
+    cmd.dstOffsetY = dstY;
+    cmd.width = width;
+    cmd.height = height;
+    cmd.depth = 1;
+    
+    commandQueue.add(cmd);
+}
+
+/**
+ * Queue image blit (with scaling)
+ */
+public static void queueBlitImage(long srcImage, long dstImage,
+                                   int srcX0, int srcY0, int srcX1, int srcY1,
+                                   int dstX0, int dstY0, int dstX1, int dstY1,
+                                   int filter) {
+    checkInitialized();
+    
+    GPUCommand cmd = new GPUCommand();
+    cmd.type = CommandType.BLIT_IMAGE;
+    cmd.srcImage = srcImage;
+    cmd.dstImage = dstImage;
+    cmd.srcOffsetX = srcX0;
+    cmd.srcOffsetY = srcY0;
+    cmd.width = srcX1; // Store as second offset
+    cmd.height = srcY1;
+    cmd.dstOffsetX = dstX0;
+    cmd.dstOffsetY = dstY0;
+    cmd.depth = dstX1;
+    cmd.mode = dstY1;
+    cmd.indexType = filter;
+    
+    commandQueue.add(cmd);
+}
+
+/**
+ * Queue push constants update
+ */
+public static void queuePushConstants(int stageFlags, int offset, byte[] data) {
+    checkInitialized();
+    
+    GPUCommand cmd = new GPUCommand();
+    cmd.type = CommandType.PUSH_CONSTANTS;
+    cmd.pushConstantStageFlags = stageFlags;
+    cmd.pushConstantOffset = offset;
+    cmd.pushConstantData = data.clone();
+    
+    commandQueue.add(cmd);
+}
+
+/**
+ * Queue memory barrier
+ */
+public static void queueMemoryBarrier(int srcAccessMask, int dstAccessMask,
+                                       int srcStageMask, int dstStageMask) {
+    checkInitialized();
+    
+    GPUCommand cmd = new GPUCommand();
+    cmd.type = CommandType.MEMORY_BARRIER;
+    cmd.srcOffsetX = srcAccessMask;
+    cmd.srcOffsetY = dstAccessMask;
+    cmd.dstOffsetX = srcStageMask;
+    cmd.dstOffsetY = dstStageMask;
+    
+    commandQueue.add(cmd);
+}
+
+// ========================================================================
+// COMMAND FLUSHING AND EXECUTION
+// ========================================================================
+
+/**
+ * Flush all queued commands to GPU
+ */
+public static void flushCommands() {
+    if (commandQueue.isEmpty()) return;
+    
+    checkInitialized();
+    
+    if (!recordingCommands) {
+        beginFrame();
+    }
+    
+    // Process all queued commands
+    GPUCommand cmd;
+    while ((cmd = commandQueue.poll()) != null) {
+        executeCommand(cmd);
+    }
+}
+
+/**
+ * Execute a single GPU command
+ */
+private static void executeCommand(GPUCommand cmd) {
+    switch (cmd.type) {
+        case DRAW_ARRAYS -> executeDrawArrays(cmd);
+        case DRAW_ELEMENTS -> executeDrawElements(cmd);
+        case DRAW_ARRAYS_INSTANCED -> executeDrawArraysInstanced(cmd);
+        case DRAW_ELEMENTS_INSTANCED -> executeDrawElementsInstanced(cmd);
+        case DISPATCH_COMPUTE -> executeDispatchCompute(cmd);
+        case COPY_BUFFER -> executeCopyBuffer(cmd);
+        case COPY_IMAGE -> executeCopyImage(cmd);
+        case BLIT_IMAGE -> executeBlitImage(cmd);
+        case MEMORY_BARRIER -> executeMemoryBarrier(cmd);
+        case PUSH_CONSTANTS -> executePushConstants(cmd);
+    }
+}
+
+private static void executeDrawArrays(GPUCommand cmd) {
+    vkCmdBindPipeline(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cmd.pipeline);
+    
+    if (cmd.vertexBuffers != null && cmd.vertexBuffers.length > 0) {
+        LongBuffer pBuffers = LongBuffer.wrap(cmd.vertexBuffers);
+        LongBuffer pOffsets = LongBuffer.wrap(cmd.vertexOffsets);
+        vkCmdBindVertexBuffers(currentCommandBuffer, 0, pBuffers, pOffsets);
+    }
+    
+    if (cmd.descriptorSet != VK_NULL_HANDLE) {
+        VulkanState.ProgramObject prog = state.getProgram(state.currentProgram);
+        if (prog != null && prog.pipelineLayout != VK_NULL_HANDLE) {
+            LongBuffer pDescriptorSets = LongBuffer.wrap(new long[]{cmd.descriptorSet});
+            vkCmdBindDescriptorSets(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                prog.pipelineLayout, 0, pDescriptorSets, null);
+        }
+    }
+    
+    vkCmdDraw(currentCommandBuffer, cmd.count, 1, cmd.first, 0);
+}
+
+private static void executeDrawElements(GPUCommand cmd) {
+    vkCmdBindPipeline(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cmd.pipeline);
+    
+    if (cmd.vertexBuffers != null && cmd.vertexBuffers.length > 0) {
+        LongBuffer pBuffers = LongBuffer.wrap(cmd.vertexBuffers);
+        LongBuffer pOffsets = LongBuffer.wrap(cmd.vertexOffsets);
+        vkCmdBindVertexBuffers(currentCommandBuffer, 0, pBuffers, pOffsets);
+    }
+    
+    if (cmd.indexBuffer != VK_NULL_HANDLE) {
+        vkCmdBindIndexBuffer(currentCommandBuffer, cmd.indexBuffer, cmd.indexOffset, cmd.indexType);
+    }
+    
+    if (cmd.descriptorSet != VK_NULL_HANDLE) {
+        VulkanState.ProgramObject prog = state.getProgram(state.currentProgram);
+        if (prog != null && prog.pipelineLayout != VK_NULL_HANDLE) {
+            LongBuffer pDescriptorSets = LongBuffer.wrap(new long[]{cmd.descriptorSet});
+            vkCmdBindDescriptorSets(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                prog.pipelineLayout, 0, pDescriptorSets, null);
+        }
+    }
+    
+    vkCmdDrawIndexed(currentCommandBuffer, cmd.count, 1, 0, 0, 0);
+}
+
+private static void executeDrawArraysInstanced(GPUCommand cmd) {
+    vkCmdBindPipeline(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cmd.pipeline);
+    
+    if (cmd.vertexBuffers != null && cmd.vertexBuffers.length > 0) {
+        LongBuffer pBuffers = LongBuffer.wrap(cmd.vertexBuffers);
+        LongBuffer pOffsets = LongBuffer.wrap(cmd.vertexOffsets);
+        vkCmdBindVertexBuffers(currentCommandBuffer, 0, pBuffers, pOffsets);
+    }
+    
+    if (cmd.descriptorSet != VK_NULL_HANDLE) {
+        VulkanState.ProgramObject prog = state.getProgram(state.currentProgram);
+        if (prog != null && prog.pipelineLayout != VK_NULL_HANDLE) {
+            LongBuffer pDescriptorSets = LongBuffer.wrap(new long[]{cmd.descriptorSet});
+            vkCmdBindDescriptorSets(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                prog.pipelineLayout, 0, pDescriptorSets, null);
+        }
+    }
+    
+    vkCmdDraw(currentCommandBuffer, cmd.count, cmd.instanceCount, cmd.first, cmd.baseInstance);
+}
+
+private static void executeDrawElementsInstanced(GPUCommand cmd) {
+    vkCmdBindPipeline(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, cmd.pipeline);
+    
+    if (cmd.vertexBuffers != null && cmd.vertexBuffers.length > 0) {
+        LongBuffer pBuffers = LongBuffer.wrap(cmd.vertexBuffers);
+        LongBuffer pOffsets = LongBuffer.wrap(cmd.vertexOffsets);
+        vkCmdBindVertexBuffers(currentCommandBuffer, 0, pBuffers, pOffsets);
+    }
+    
+    if (cmd.indexBuffer != VK_NULL_HANDLE) {
+        vkCmdBindIndexBuffer(currentCommandBuffer, cmd.indexBuffer, cmd.indexOffset, cmd.indexType);
+    }
+    
+    if (cmd.descriptorSet != VK_NULL_HANDLE) {
+        VulkanState.ProgramObject prog = state.getProgram(state.currentProgram);
+        if (prog != null && prog.pipelineLayout != VK_NULL_HANDLE) {
+            LongBuffer pDescriptorSets = LongBuffer.wrap(new long[]{cmd.descriptorSet});
+            vkCmdBindDescriptorSets(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                prog.pipelineLayout, 0, pDescriptorSets, null);
+        }
+    }
+    
+    vkCmdDrawIndexed(currentCommandBuffer, cmd.count, cmd.instanceCount, 0, 0, cmd.baseInstance);
+}
+
+private static void executeDispatchCompute(GPUCommand cmd) {
+    if (cmd.pipeline == VK_NULL_HANDLE) {
+        FPSFlux.LOGGER.warn("[VulkanCallMapperX] No compute pipeline bound");
+        return;
+    }
+    
+    vkCmdBindPipeline(currentCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, cmd.pipeline);
+    
+    if (cmd.descriptorSet != VK_NULL_HANDLE) {
+        VulkanState.ProgramObject prog = state.getProgram(state.currentProgram);
+        if (prog != null && prog.pipelineLayout != VK_NULL_HANDLE) {
+            LongBuffer pDescriptorSets = LongBuffer.wrap(new long[]{cmd.descriptorSet});
+            vkCmdBindDescriptorSets(currentCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                prog.pipelineLayout, 0, pDescriptorSets, null);
+        }
+    }
+    
+    vkCmdDispatch(currentCommandBuffer, cmd.groupCountX, cmd.groupCountY, cmd.groupCountZ);
+}
+
+private static void executeCopyBuffer(GPUCommand cmd) {
+    VkBufferCopy.Buffer region = VkBufferCopy.calloc(1)
+        .srcOffset(cmd.srcOffsetX)
+        .dstOffset(cmd.dstOffsetX)
+        .size(cmd.width);
+    
+    vkCmdCopyBuffer(currentCommandBuffer, cmd.srcBuffer, cmd.dstBuffer, region);
+    
+    region.free();
+}
+
+private static void executeCopyImage(GPUCommand cmd) {
+    VkImageCopy.Buffer region = VkImageCopy.calloc(1);
+    
+    region.get(0).srcSubresource()
+        .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+        .mipLevel(0)
+        .baseArrayLayer(0)
+        .layerCount(1);
+    region.get(0).srcOffset().set(cmd.srcOffsetX, cmd.srcOffsetY, cmd.srcOffsetZ);
+    
+    region.get(0).dstSubresource()
+        .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+        .mipLevel(0)
+        .baseArrayLayer(0)
+        .layerCount(1);
+    region.get(0).dstOffset().set(cmd.dstOffsetX, cmd.dstOffsetY, cmd.dstOffsetZ);
+    
+    region.get(0).extent().set(cmd.width, cmd.height, cmd.depth);
+    
+    vkCmdCopyImage(currentCommandBuffer, 
+        cmd.srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        cmd.dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        region);
+    
+    region.free();
+}
+
+private static void executeBlitImage(GPUCommand cmd) {
+    VkImageBlit.Buffer region = VkImageBlit.calloc(1);
+    
+    region.get(0).srcSubresource()
+        .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+        .mipLevel(0)
+        .baseArrayLayer(0)
+        .layerCount(1);
+    region.get(0).srcOffsets(0).set(cmd.srcOffsetX, cmd.srcOffsetY, 0);
+    region.get(0).srcOffsets(1).set(cmd.width, cmd.height, 1); // srcX1, srcY1
+    
+    region.get(0).dstSubresource()
+        .aspectMask(VK_IMAGE_ASPECT_COLOR_BIT)
+        .mipLevel(0)
+        .baseArrayLayer(0)
+        .layerCount(1);
+    region.get(0).dstOffsets(0).set(cmd.dstOffsetX, cmd.dstOffsetY, 0);
+    region.get(0).dstOffsets(1).set(cmd.depth, cmd.mode, 1); // dstX1, dstY1
+    
+    int filter = (cmd.indexType == 0x2601) ? VK_FILTER_LINEAR : VK_FILTER_NEAREST; // GL_LINEAR
+    
+    vkCmdBlitImage(currentCommandBuffer,
+        cmd.srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        cmd.dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        region, filter);
+    
+    region.free();
+}
+
+private static void executeMemoryBarrier(GPUCommand cmd) {
+    VkMemoryBarrier.Buffer barrier = VkMemoryBarrier.calloc(1)
+        .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
+        .srcAccessMask(cmd.srcOffsetX)
+        .dstAccessMask(cmd.srcOffsetY);
+    
+    vkCmdPipelineBarrier(currentCommandBuffer,
+        cmd.dstOffsetX, cmd.dstOffsetY, // srcStage, dstStage
+        0, barrier, null, null);
+    
+    barrier.free();
+}
+
+private static void executePushConstants(GPUCommand cmd) {
+    VulkanState.ProgramObject prog = state.getProgram(state.currentProgram);
+    if (prog == null || prog.pipelineLayout == VK_NULL_HANDLE) return;
+    
+    ByteBuffer data = ByteBuffer.allocateDirect(cmd.pushConstantData.length);
+    data.put(cmd.pushConstantData);
+    data.flip();
+    
+    vkCmdPushConstants(currentCommandBuffer, prog.pipelineLayout,
+        cmd.pushConstantStageFlags, cmd.pushConstantOffset, data);
+}
+
+// ========================================================================
+// INDIRECT DRAWING (GPU-driven)
+// ========================================================================
+
+/**
+ * GL: glDrawArraysIndirect(mode, indirect)
+ * VK: vkCmdDrawIndirect - GPU reads draw parameters from buffer
+ */
+public static void drawArraysIndirect(int mode, long indirectBuffer, long offset) {
+    checkInitialized();
+    
+    if (!recordingCommands) {
+        beginFrame();
+    }
+    
+    long pipeline = getOrCreatePipeline(mode);
+    vkCmdBindPipeline(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    
+    // Bind vertex buffers
+    long vbo = state.getBoundBuffer(0x8892);
+    if (vbo != 0) {
+        VulkanState.BufferObject bufObj = state.getBuffer(vbo);
+        if (bufObj.buffer != VK_NULL_HANDLE) {
+            LongBuffer pBuffers = LongBuffer.wrap(new long[]{bufObj.buffer});
+            LongBuffer pOffsets = LongBuffer.wrap(new long[]{0});
+            vkCmdBindVertexBuffers(currentCommandBuffer, 0, pBuffers, pOffsets);
+        }
+    }
+    
+    bindDescriptorSets();
+    
+    // Get indirect buffer
+    VulkanState.BufferObject indirectBufObj = state.getBuffer(indirectBuffer);
+    if (indirectBufObj == null || indirectBufObj.buffer == VK_NULL_HANDLE) {
+        throw new RuntimeException("Invalid indirect buffer");
+    }
+    
+    // Draw indirect (GPU reads VkDrawIndirectCommand from buffer)
+    vkCmdDrawIndirect(currentCommandBuffer, indirectBufObj.buffer, offset, 1, 0);
+}
+
+/**
+ * GL: glDrawElementsIndirect(mode, type, indirect)
+ * VK: vkCmdDrawIndexedIndirect
+ */
+public static void drawElementsIndirect(int mode, int type, long indirectBuffer, long offset) {
+    checkInitialized();
+    
+    if (!recordingCommands) {
+        beginFrame();
+    }
+    
+    long pipeline = getOrCreatePipeline(mode);
+    vkCmdBindPipeline(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    
+    // Bind vertex buffer
+    long vbo = state.getBoundBuffer(0x8892);
+    if (vbo != 0) {
+        VulkanState.BufferObject bufObj = state.getBuffer(vbo);
+        if (bufObj.buffer != VK_NULL_HANDLE) {
+            LongBuffer pBuffers = LongBuffer.wrap(new long[]{bufObj.buffer});
+            LongBuffer pOffsets = LongBuffer.wrap(new long[]{0});
+            vkCmdBindVertexBuffers(currentCommandBuffer, 0, pBuffers, pOffsets);
+        }
+    }
+    
+    // Bind index buffer
+    long ibo = state.getBoundBuffer(0x8893);
+    if (ibo != 0) {
+        VulkanState.BufferObject bufObj = state.getBuffer(ibo);
+        int indexType = (type == 0x1405) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16;
+        vkCmdBindIndexBuffer(currentCommandBuffer, bufObj.buffer, 0, indexType);
+    }
+    
+    bindDescriptorSets();
+    
+    // Get indirect buffer
+    VulkanState.BufferObject indirectBufObj = state.getBuffer(indirectBuffer);
+    if (indirectBufObj == null || indirectBufObj.buffer == VK_NULL_HANDLE) {
+        throw new RuntimeException("Invalid indirect buffer");
+    }
+    
+    // Draw indexed indirect
+    vkCmdDrawIndexedIndirect(currentCommandBuffer, indirectBufObj.buffer, offset, 1, 0);
+}
+
+/**
+ * GL: glMultiDrawArraysIndirect(mode, indirect, drawcount, stride)
+ * VK: vkCmdDrawIndirect with count > 1
+ */
+public static void multiDrawArraysIndirect(int mode, long indirectBuffer, long offset, int drawCount, int stride) {
+    checkInitialized();
+    
+    if (!recordingCommands) {
+        beginFrame();
+    }
+    
+    long pipeline = getOrCreatePipeline(mode);
+    vkCmdBindPipeline(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    
+    long vbo = state.getBoundBuffer(0x8892);
+    if (vbo != 0) {
+        VulkanState.BufferObject bufObj = state.getBuffer(vbo);
+        if (bufObj.buffer != VK_NULL_HANDLE) {
+            LongBuffer pBuffers = LongBuffer.wrap(new long[]{bufObj.buffer});
+            LongBuffer pOffsets = LongBuffer.wrap(new long[]{0});
+            vkCmdBindVertexBuffers(currentCommandBuffer, 0, pBuffers, pOffsets);
+        }
+    }
+    
+    bindDescriptorSets();
+    
+    VulkanState.BufferObject indirectBufObj = state.getBuffer(indirectBuffer);
+    if (indirectBufObj == null || indirectBufObj.buffer == VK_NULL_HANDLE) {
+        throw new RuntimeException("Invalid indirect buffer");
+    }
+    
+    // Multi-draw indirect
+    vkCmdDrawIndirect(currentCommandBuffer, indirectBufObj.buffer, offset, drawCount, stride);
+}
+
+/**
+ * GL: glMultiDrawElementsIndirect(mode, type, indirect, drawcount, stride)
+ * VK: vkCmdDrawIndexedIndirect with count > 1
+ */
+public static void multiDrawElementsIndirect(int mode, int type, long indirectBuffer, long offset, 
+                                              int drawCount, int stride) {
+    checkInitialized();
+    
+    if (!recordingCommands) {
+        beginFrame();
+    }
+    
+    long pipeline = getOrCreatePipeline(mode);
+    vkCmdBindPipeline(currentCommandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    
+    long vbo = state.getBoundBuffer(0x8892);
+    if (vbo != 0) {
+        VulkanState.BufferObject bufObj = state.getBuffer(vbo);
+        if (bufObj.buffer != VK_NULL_HANDLE) {
+            LongBuffer pBuffers = LongBuffer.wrap(new long[]{bufObj.buffer});
+            LongBuffer pOffsets = LongBuffer.wrap(new long[]{0});
+            vkCmdBindVertexBuffers(currentCommandBuffer, 0, pBuffers, pOffsets);
+        }
+    }
+    
+    long ibo = state.getBoundBuffer(0x8893);
+    if (ibo != 0) {
+        VulkanState.BufferObject bufObj = state.getBuffer(ibo);
+        int indexType = (type == 0x1405) ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16;
+        vkCmdBindIndexBuffer(currentCommandBuffer, bufObj.buffer, 0, indexType);
+    }
+    
+    bindDescriptorSets();
+    
+    VulkanState.BufferObject indirectBufObj = state.getBuffer(indirectBuffer);
+    if (indirectBufObj == null || indirectBufObj.buffer == VK_NULL_HANDLE) {
+        throw new RuntimeException("Invalid indirect buffer");
+    }
+    
+    // Multi-draw indexed indirect
+    vkCmdDrawIndexedIndirect(currentCommandBuffer, indirectBufObj.buffer, offset, drawCount, stride);
+}
+
+// ========================================================================
+// COMPUTE SHADER DISPATCH
+// ========================================================================
+
+/**
+ * GL: glDispatchCompute(num_groups_x, num_groups_y, num_groups_z)
+ * VK: vkCmdDispatch
+ */
+public static void dispatchCompute(int numGroupsX, int numGroupsY, int numGroupsZ) {
+    checkInitialized();
+    
+    // Compute dispatch doesn't need render pass
+    VkCommandBuffer cmdBuffer = ctx.beginSingleTimeCommands();
+    
+    long computePipeline = state.getCurrentComputePipeline();
+    if (computePipeline == VK_NULL_HANDLE) {
+        ctx.endSingleTimeCommands(cmdBuffer);
+        throw new RuntimeException("No compute pipeline bound");
+    }
+    
+    vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
+    
+    // Bind descriptor sets
+    VulkanState.ProgramObject prog = state.getProgram(state.currentProgram);
+    if (prog != null && prog.pipelineLayout != VK_NULL_HANDLE) {
+        long descriptorSet = descriptorSets[currentDescriptorSetIndex];
+        LongBuffer pDescriptorSets = LongBuffer.wrap(new long[]{descriptorSet});
+        vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+            prog.pipelineLayout, 0, pDescriptorSets, null);
+    }
+    
+    vkCmdDispatch(cmdBuffer, numGroupsX, numGroupsY, numGroupsZ);
+    
+    ctx.endSingleTimeCommands(cmdBuffer);
+}
+
+/**
+ * GL: glDispatchComputeIndirect(indirect)
+ * VK: vkCmdDispatchIndirect
+ */
+public static void dispatchComputeIndirect(long indirectBuffer, long offset) {
+    checkInitialized();
+    
+    VkCommandBuffer cmdBuffer = ctx.beginSingleTimeCommands();
+    
+    long computePipeline = state.getCurrentComputePipeline();
+    if (computePipeline == VK_NULL_HANDLE) {
+        ctx.endSingleTimeCommands(cmdBuffer);
+        throw new RuntimeException("No compute pipeline bound");
+    }
+    
+    vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
+    
+    VulkanState.ProgramObject prog = state.getProgram(state.currentProgram);
+    if (prog != null && prog.pipelineLayout != VK_NULL_HANDLE) {
+        long descriptorSet = descriptorSets[currentDescriptorSetIndex];
+        LongBuffer pDescriptorSets = LongBuffer.wrap(new long[]{descriptorSet});
+        vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+            prog.pipelineLayout, 0, pDescriptorSets, null);
+    }
+    
+    VulkanState.BufferObject indirectBufObj = state.getBuffer(indirectBuffer);
+    if (indirectBufObj == null || indirectBufObj.buffer == VK_NULL_HANDLE) {
+        ctx.endSingleTimeCommands(cmdBuffer);
+        throw new RuntimeException("Invalid indirect buffer");
+    }
+    
+    vkCmdDispatchIndirect(cmdBuffer, indirectBufObj.buffer, offset);
+    
+    ctx.endSingleTimeCommands(cmdBuffer);
+}
+
+// ========================================================================
+// MEMORY BARRIERS
+// ========================================================================
+
+/**
+ * GL: glMemoryBarrier(barriers)
+ * VK: vkCmdPipelineBarrier
+ */
+public static void memoryBarrier(int barriers) {
+    checkInitialized();
+    
+    if (!recordingCommands) {
+        // Need to execute immediately outside of render pass
+        VkCommandBuffer cmdBuffer = ctx.beginSingleTimeCommands();
+        insertMemoryBarrier(cmdBuffer, barriers);
+        ctx.endSingleTimeCommands(cmdBuffer);
+    } else {
+        // End render pass, insert barrier, restart render pass
+        // This is expensive but necessary for correctness
+        vkCmdEndRenderPass(currentCommandBuffer);
+        insertMemoryBarrier(currentCommandBuffer, barriers);
+        
+        // Restart render pass
+        VkRenderPassBeginInfo renderPassInfo = VkRenderPassBeginInfo.calloc()
+            .sType(VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO)
+            .renderPass(ctx.renderPass)
+            .framebuffer(ctx.getCurrentFramebuffer());
+        
+        renderPassInfo.renderArea().offset().set(0, 0);
+        renderPassInfo.renderArea().extent().set(ctx.swapchainExtent.width(), ctx.swapchainExtent.height());
+        
+        // No clear values since we're continuing
+        vkCmdBeginRenderPass(currentCommandBuffer, renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+        
+        renderPassInfo.free();
+    }
+}
+
+private static void insertMemoryBarrier(VkCommandBuffer cmdBuffer, int glBarriers) {
+    int srcStage = 0;
+    int dstStage = 0;
+    int srcAccess = 0;
+    int dstAccess = 0;
+    
+    // Translate GL barrier bits to Vulkan
+    if ((glBarriers & 0x00000001) != 0) { // GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT
+        srcStage |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+        dstStage |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+        srcAccess |= VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+        dstAccess |= VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+    }
+    if ((glBarriers & 0x00000002) != 0) { // GL_ELEMENT_ARRAY_BARRIER_BIT
+        srcStage |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+        dstStage |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+        srcAccess |= VK_ACCESS_INDEX_READ_BIT;
+        dstAccess |= VK_ACCESS_INDEX_READ_BIT;
+    }
+    if ((glBarriers & 0x00000004) != 0) { // GL_UNIFORM_BARRIER_BIT
+        srcStage |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        dstStage |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        srcAccess |= VK_ACCESS_UNIFORM_READ_BIT;
+        dstAccess |= VK_ACCESS_UNIFORM_READ_BIT;
+    }
+    if ((glBarriers & 0x00000008) != 0) { // GL_TEXTURE_FETCH_BARRIER_BIT
+        srcStage |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        dstStage |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        srcAccess |= VK_ACCESS_SHADER_READ_BIT;
+        dstAccess |= VK_ACCESS_SHADER_READ_BIT;
+    }
+    if ((glBarriers & 0x00000020) != 0) { // GL_SHADER_IMAGE_ACCESS_BARRIER_BIT
+        srcStage |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+        dstStage |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+        srcAccess |= VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        dstAccess |= VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    }
+    if ((glBarriers & 0x00000080) != 0) { // GL_COMMAND_BARRIER_BIT
+        srcStage |= VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
+        dstStage |= VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT;
+        srcAccess |= VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+        dstAccess |= VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+    }
+    if ((glBarriers & 0x00000400) != 0) { // GL_BUFFER_UPDATE_BARRIER_BIT
+        srcStage |= VK_PIPELINE_STAGE_TRANSFER_BIT;
+        dstStage |= VK_PIPELINE_STAGE_TRANSFER_BIT;
+        srcAccess |= VK_ACCESS_TRANSFER_WRITE_BIT;
+        dstAccess |= VK_ACCESS_TRANSFER_READ_BIT;
+    }
+    if ((glBarriers & 0x00000800) != 0) { // GL_FRAMEBUFFER_BARRIER_BIT
+        srcStage |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dstStage |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        srcAccess |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dstAccess |= VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+    }
+    if ((glBarriers & 0x00002000) != 0) { // GL_SHADER_STORAGE_BARRIER_BIT
+        srcStage |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+        dstStage |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+        srcAccess |= VK_ACCESS_SHADER_WRITE_BIT;
+        dstAccess |= VK_ACCESS_SHADER_READ_BIT;
+    }
+    if ((glBarriers & 0xFFFFFFFF) != 0 && glBarriers == 0xFFFFFFFF) { // GL_ALL_BARRIER_BITS
+        srcStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        dstStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        srcAccess = VK_ACCESS_MEMORY_WRITE_BIT;
+        dstAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    }
+    
+    if (srcStage == 0) srcStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    if (dstStage == 0) dstStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    
+    VkMemoryBarrier.Buffer barrier = VkMemoryBarrier.calloc(1)
+        .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
+        .srcAccessMask(srcAccess)
+        .dstAccessMask(dstAccess);
+    
+    vkCmdPipelineBarrier(cmdBuffer, srcStage, dstStage, 0, barrier, null, null);
+    
+    barrier.free();
+}
+
+// ========================================================================
+// ASYNC / FENCE OPERATIONS
+// ========================================================================
+
+/**
+ * GL: glFenceSync(condition, flags)
+ * VK: Create timeline semaphore signal
+ */
+public static long fenceSync(int condition, int flags) {
+    checkInitialized();
+    
+    if (timelineSemaphore == VK_NULL_HANDLE) {
+        // Fallback to fence-based sync
+        VkFenceCreateInfo fenceInfo = VkFenceCreateInfo.calloc()
+            .sType(VK_STRUCTURE_TYPE_FENCE_CREATE_INFO);
+        
+        LongBuffer pFence = LongBuffer.allocate(1);
+        vkCreateFence(ctx.device, fenceInfo, null, pFence);
+        fenceInfo.free();
+        
+        long fence = pFence.get(0);
+        
+        // Submit an empty command buffer to signal the fence
+        VkCommandBuffer cmdBuffer = ctx.beginSingleTimeCommands();
+        ctx.endSingleTimeCommandsWithFence(cmdBuffer, fence);
+        
+        return fence;
+    }
+    
+    // Use timeline semaphore
+    long signalValue = timelineValue.incrementAndGet();
+    
+    // Signal the timeline semaphore
+    VkSemaphoreSignalInfo signalInfo = VkSemaphoreSignalInfo.calloc()
+        .sType(VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO)
+        .semaphore(timelineSemaphore)
+        .value(signalValue);
+    
+    vkSignalSemaphore(ctx.device, signalInfo);
+    signalInfo.free();
+    
+    // Return encoded sync object (high bit = timeline, low 63 bits = value)
+    return 0x8000000000000000L | signalValue;
+}
+
+/**
+ * GL: glClientWaitSync(sync, flags, timeout)
+ * VK: Wait on fence or timeline semaphore
+ */
+public static int clientWaitSync(long sync, int flags, long timeout) {
+    checkInitialized();
+    
+    if ((sync & 0x8000000000000000L) != 0) {
+        // Timeline semaphore
+        long waitValue = sync & 0x7FFFFFFFFFFFFFFFL;
+        
+        VkSemaphoreWaitInfo waitInfo = VkSemaphoreWaitInfo.calloc()
+            .sType(VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO)
+            .pSemaphores(LongBuffer.wrap(new long[]{timelineSemaphore}))
+            .pValues(LongBuffer.wrap(new long[]{waitValue}));
+        
+        int result = vkWaitSemaphores(ctx.device, waitInfo, timeout);
+        waitInfo.free();
+        
+        if (result == VK_SUCCESS) {
+            return 0x911A; // GL_ALREADY_SIGNALED
+        } else if (result == VK_TIMEOUT) {
+            return 0x911B; // GL_TIMEOUT_EXPIRED
+        } else {
+            return 0x911D; // GL_WAIT_FAILED
+        }
+    } else {
+        // Fence
+        int result = vkWaitForFences(ctx.device, new long[]{sync}, true, timeout);
+        
+        if (result == VK_SUCCESS) {
+            return 0x911A; // GL_ALREADY_SIGNALED
+        } else if (result == VK_TIMEOUT) {
+            return 0x911B; // GL_TIMEOUT_EXPIRED
+        } else {
+            return 0x911D; // GL_WAIT_FAILED
+        }
+    }
+}
+
+/**
+ * GL: glWaitSync(sync, flags, timeout)
+ * VK: GPU-side wait (insert into command stream)
+ */
+public static void waitSync(long sync, int flags, long timeout) {
+    checkInitialized();
+    
+    // This is a GPU-side wait, not CPU-side
+    // In Vulkan, this is handled via semaphore dependencies in queue submission
+    // For now, we'll insert a pipeline barrier as approximation
+    
+    if (!recordingCommands) {
+        beginFrame();
+    }
+    
+    VkMemoryBarrier.Buffer barrier = VkMemoryBarrier.calloc(1)
+        .sType(VK_STRUCTURE_TYPE_MEMORY_BARRIER)
+        .srcAccessMask(VK_ACCESS_MEMORY_WRITE_BIT)
+        .dstAccessMask(VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT);
+    
+    vkCmdPipelineBarrier(currentCommandBuffer,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        0, barrier, null, null);
+    
+    barrier.free();
+}
+
+/**
+ * GL: glDeleteSync(sync)
+ * VK: Destroy fence or decrement timeline reference
+ */
+public static void deleteSync(long sync) {
+    checkInitialized();
+    
+    if ((sync & 0x8000000000000000L) != 0) {
+        // Timeline semaphore - nothing to delete per-sync
+        // The semaphore is shared and destroyed on shutdown
+    } else {
+        // Fence
+        vkDestroyFence(ctx.device, sync, null);
+    }
+}
+
+/**
+ * GL: glFinish()
+ * VK: Wait for all GPU operations to complete
+ */
+public static void finish() {
+    checkInitialized();
+    
+    // Flush any pending commands
+    if (recordingCommands) {
+        endFrame();
+    }
+    flushCommands();
+    
+    // Wait for device idle
+    vkDeviceWaitIdle(ctx.device);
+}
+
+/**
+ * GL: glFlush()
+ * VK: Submit pending commands (don't wait)
+ */
+public static void flush() {
+    checkInitialized();
+    flushCommands();
+}
+
+// ========================================================================
+// CLEANUP
+// ========================================================================
+
+/**
+ * Shutdown GPU execution system
+ */
+private static void shutdownGPUExecution() {
+    // Wait for all work to complete
+    vkDeviceWaitIdle(ctx.device);
+    
+    // Destroy command buffer fences
+    if (commandBufferFences != null) {
+        for (long fence : commandBufferFences) {
+            if (fence != VK_NULL_HANDLE) {
+                vkDestroyFence(ctx.device, fence, null);
+            }
+        }
+    }
+    
+    // Destroy timeline semaphore
+    if (timelineSemaphore != VK_NULL_HANDLE) {
+        vkDestroySemaphore(ctx.device, timelineSemaphore, null);
+        timelineSemaphore = VK_NULL_HANDLE;
+    }
+    
+    // Clear command queue
+    commandQueue.clear();
+    
+    FPSFlux.LOGGER.info("[VulkanCallMapperX] GPU execution system shutdown");
+}
+
+// ========================================================================
 // TEXTURE HELPER METHODS
 // ========================================================================
 
