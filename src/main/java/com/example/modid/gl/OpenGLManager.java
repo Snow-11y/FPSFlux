@@ -13,6 +13,7 @@ import com.example.modid.gl.buffer.ops.GLBufferOps21;
 import com.example.modid.gl.buffer.ops.GLBufferOps30;
 import com.example.modid.gl.buffer.ops.GLBufferOps33;
 import com.example.modid.gl.buffer.ops.GLBufferOps40;
+import com.example.modid.gl.buffer.ops.GLBufferOps42;
 import com.example.modid.gl.buffer.ops.GLBufferOps43;
 import com.example.modid.gl.buffer.ops.GLBufferOps44;
 import com.example.modid.gl.buffer.ops.GLBufferOps45;
@@ -44,6 +45,11 @@ import java.nio.IntBuffer;
  * - This manager assumes the game runs GL on a single render thread.
  * - If vanilla/other mods call GL directly (bypassing manager), call invalidateState()
  *   before your rendering pass to avoid state desync.
+ * 
+ * CONTEXT LIMITATION:
+ * - This manager is designed for single GL context usage (standard for Minecraft).
+ * - If multiple GL contexts exist (rare, but possible with some launchers/mods),
+ *   each context would need its own manager instance. Current design does not support this.
  */
 public final class OpenGLManager {
 
@@ -106,6 +112,7 @@ public final class OpenGLManager {
         final boolean enableMultiDrawIndirect; // allow MultiDrawIndirect usage if supported
         final boolean enablePersistentMapping; // allow persistent map usage (pipelines may use)
         final boolean enableDSA;         // allow DSA usage (pipelines may use)
+        final boolean throwOnInitFailure; // if true, init() throws instead of returning false
 
         Settings(Config cfg) {
             this.maxGL = getInt(cfg, "getMaxGLVersion", 46);
@@ -120,6 +127,7 @@ public final class OpenGLManager {
             this.enableMultiDrawIndirect = getBool(cfg, "getUseMultiDrawIndirect", true);
             this.enablePersistentMapping = getBool(cfg, "getUsePersistentMapping", true);
             this.enableDSA = getBool(cfg, "getUseDSA", true);
+            this.throwOnInitFailure = getBool(cfg, "getThrowOnInitFailure", false);
         }
 
         private static boolean getBool(Object o, String method, boolean def) {
@@ -145,44 +153,130 @@ public final class OpenGLManager {
 
     public static final int GL_VERSION = 0x1F02;
 
+    // Buffer targets
     public static final int GL_ARRAY_BUFFER = 0x8892;
     public static final int GL_ELEMENT_ARRAY_BUFFER = 0x8893;
     public static final int GL_COPY_READ_BUFFER = 0x8F36;
     public static final int GL_COPY_WRITE_BUFFER = 0x8F37;
+    public static final int GL_PIXEL_PACK_BUFFER = 0x88EB;
+    public static final int GL_PIXEL_UNPACK_BUFFER = 0x88EC;
+    public static final int GL_UNIFORM_BUFFER = 0x8A11;
+    public static final int GL_TEXTURE_BUFFER = 0x8C2A;
+    public static final int GL_TRANSFORM_FEEDBACK_BUFFER = 0x8C8E;
+    public static final int GL_DRAW_INDIRECT_BUFFER = 0x8F3F;
+    public static final int GL_ATOMIC_COUNTER_BUFFER = 0x92C0;
+    public static final int GL_DISPATCH_INDIRECT_BUFFER = 0x90EE;
+    public static final int GL_SHADER_STORAGE_BUFFER = 0x90D2;
+    public static final int GL_QUERY_BUFFER = 0x9192;
 
+    // Capabilities
     public static final int GL_DEPTH_TEST = 0x0B71;
     public static final int GL_BLEND = 0x0BE2;
     public static final int GL_CULL_FACE = 0x0B44;
     public static final int GL_SCISSOR_TEST = 0x0C11;
     public static final int GL_STENCIL_TEST = 0x0B90;
+    public static final int GL_ALPHA_TEST = 0x0BC0;
+    public static final int GL_POLYGON_OFFSET_FILL = 0x8037;
+    public static final int GL_MULTISAMPLE = 0x809D;
+    public static final int GL_SAMPLE_ALPHA_TO_COVERAGE = 0x809E;
+    public static final int GL_LINE_SMOOTH = 0x0B20;
+    public static final int GL_POLYGON_SMOOTH = 0x0B41;
+    public static final int GL_TEXTURE_2D = 0x0DE1;
 
     // ---------------------------------------------------------------------
-    // Tiny state cache (single-thread assumed)
+    // Expanded state cache (single-thread assumed)
     // ---------------------------------------------------------------------
 
     private static final class State {
-        int arrayBuffer = -1;
-        int elementBuffer = -1;
+        // Buffer bindings - using array for arbitrary target caching
+        // Index by target ordinal (computed from target constant)
+        private static final int BUFFER_TARGET_COUNT = 16;
+        final int[] bufferBindings = new int[BUFFER_TARGET_COUNT];
+        
+        // Capability enable/disable bits
         long enableBits = 0L;
 
+        // Depth state
         int depthFunc = -1;
         boolean depthMask = true;
 
+        // Blend state
         int blendSrcRGB = -1, blendDstRGB = -1, blendSrcA = -1, blendDstA = -1;
+        int blendEquationRGB = -1, blendEquationA = -1;
 
+        // Texture bindings (most common units)
+        int activeTexture = -1;
+        final int[] texture2DBindings = new int[16]; // units 0-15
+
+        // VAO binding (GL 3.0+)
+        int boundVAO = -1;
+        
+        // Program binding
+        int boundProgram = -1;
+        
+        // Framebuffer bindings
+        int boundDrawFBO = -1;
+        int boundReadFBO = -1;
+
+        // Capability bit indices
         static final int BIT_DEPTH = 0;
         static final int BIT_BLEND = 1;
         static final int BIT_CULL  = 2;
         static final int BIT_SCISS = 3;
         static final int BIT_STEN  = 4;
+        static final int BIT_ALPHA = 5;
+        static final int BIT_POLY_OFFSET = 6;
+        static final int BIT_MULTISAMPLE = 7;
+        static final int BIT_SAMPLE_ALPHA = 8;
+        static final int BIT_LINE_SMOOTH = 9;
+        static final int BIT_POLY_SMOOTH = 10;
+        static final int BIT_TEX2D = 11;
+
+        State() {
+            invalidate();
+        }
 
         void invalidate() {
-            arrayBuffer = -1;
-            elementBuffer = -1;
+            for (int i = 0; i < BUFFER_TARGET_COUNT; i++) {
+                bufferBindings[i] = -1;
+            }
             enableBits = 0L;
             depthFunc = -1;
             depthMask = true;
             blendSrcRGB = blendDstRGB = blendSrcA = blendDstA = -1;
+            blendEquationRGB = blendEquationA = -1;
+            activeTexture = -1;
+            for (int i = 0; i < texture2DBindings.length; i++) {
+                texture2DBindings[i] = -1;
+            }
+            boundVAO = -1;
+            boundProgram = -1;
+            boundDrawFBO = -1;
+            boundReadFBO = -1;
+        }
+
+        /**
+         * Maps buffer target constant to cache index.
+         * Returns -1 for unknown/uncached targets.
+         */
+        static int targetToIndex(int target) {
+            switch (target) {
+                case GL_ARRAY_BUFFER:              return 0;
+                case GL_ELEMENT_ARRAY_BUFFER:      return 1;
+                case GL_COPY_READ_BUFFER:          return 2;
+                case GL_COPY_WRITE_BUFFER:         return 3;
+                case GL_PIXEL_PACK_BUFFER:         return 4;
+                case GL_PIXEL_UNPACK_BUFFER:       return 5;
+                case GL_UNIFORM_BUFFER:            return 6;
+                case GL_TEXTURE_BUFFER:            return 7;
+                case GL_TRANSFORM_FEEDBACK_BUFFER: return 8;
+                case GL_DRAW_INDIRECT_BUFFER:      return 9;
+                case GL_ATOMIC_COUNTER_BUFFER:     return 10;
+                case GL_DISPATCH_INDIRECT_BUFFER:  return 11;
+                case GL_SHADER_STORAGE_BUFFER:     return 12;
+                case GL_QUERY_BUFFER:              return 13;
+                default:                           return -1;
+            }
         }
     }
 
@@ -198,7 +292,9 @@ public final class OpenGLManager {
         final Object impl;
 
         final MethodHandle mhGenBuffer; // ()int
+        final MethodHandle mhGenBuffers; // (int)int[] (optional batch)
         final MethodHandle mhDeleteBuffer; // (int)void
+        final MethodHandle mhDeleteBuffers; // (int[])void (optional batch)
         final MethodHandle mhBindBuffer; // (int,int)void
 
         final MethodHandle mhBufferDataSize; // (int,long,int)void
@@ -225,8 +321,20 @@ public final class OpenGLManager {
         final MethodHandle mhCopyBufferSubData; // (int,int,long,long,long)void (optional)
         final boolean hasCopyBufferSubData;
 
+        final MethodHandle mhInvalidateBufferData; // (int)void (optional, GL 4.3+)
+        final boolean hasInvalidateBufferData;
+
+        final MethodHandle mhInvalidateBufferSubData; // (int,long,long)void (optional, GL 4.3+)
+        final boolean hasInvalidateBufferSubData;
+
+        final MethodHandle mhGetBufferParameteri; // (int,int)int (optional)
+        final boolean hasGetBufferParameteri;
+
         final MethodHandle mhShutdown; // ()void (optional)
         final boolean hasShutdown;
+
+        final boolean hasGenBuffers;
+        final boolean hasDeleteBuffers;
 
         BufferDispatch(Object impl, MethodHandles.Lookup lookup) {
             this.impl = impl;
@@ -235,6 +343,15 @@ public final class OpenGLManager {
             mhGenBuffer = bindRequired(lookup, impl, "genBuffer", MethodType.methodType(int.class));
             mhDeleteBuffer = bindRequired(lookup, impl, "deleteBuffer", MethodType.methodType(void.class, int.class));
             mhBindBuffer = bindRequired(lookup, impl, "bindBuffer", MethodType.methodType(void.class, int.class, int.class));
+
+            // Optional batch operations
+            MethodHandle genBatch = bindOptional(lookup, impl, "genBuffers", MethodType.methodType(int[].class, int.class));
+            mhGenBuffers = genBatch;
+            hasGenBuffers = (genBatch != null);
+
+            MethodHandle delBatch = bindOptional(lookup, impl, "deleteBuffers", MethodType.methodType(void.class, int[].class));
+            mhDeleteBuffers = delBatch;
+            hasDeleteBuffers = (delBatch != null);
 
             mhBufferDataSize = bindRequired(lookup, impl, "bufferData", MethodType.methodType(void.class, int.class, long.class, int.class));
             mhBufferDataBB = bindRequired(lookup, impl, "bufferData", MethodType.methodType(void.class, int.class, ByteBuffer.class, int.class));
@@ -287,6 +404,23 @@ public final class OpenGLManager {
             mhCopyBufferSubData = copy;
             hasCopyBufferSubData = (copy != null);
 
+            // GL 4.3+ invalidation
+            MethodHandle invData = bindOptional(lookup, impl, "invalidateBufferData",
+                    MethodType.methodType(void.class, int.class));
+            mhInvalidateBufferData = invData;
+            hasInvalidateBufferData = (invData != null);
+
+            MethodHandle invSub = bindOptional(lookup, impl, "invalidateBufferSubData",
+                    MethodType.methodType(void.class, int.class, long.class, long.class));
+            mhInvalidateBufferSubData = invSub;
+            hasInvalidateBufferSubData = (invSub != null);
+
+            // Query
+            MethodHandle getParam = bindOptional(lookup, impl, "getBufferParameteri",
+                    MethodType.methodType(int.class, int.class, int.class));
+            mhGetBufferParameteri = getParam;
+            hasGetBufferParameteri = (getParam != null);
+
             MethodHandle shut = bindOptional(lookup, impl, "shutdown",
                     MethodType.methodType(void.class));
             mhShutdown = shut;
@@ -301,9 +435,40 @@ public final class OpenGLManager {
             }
         }
 
+        int[] genBuffers(int count) {
+            if (!hasGenBuffers) {
+                // Fallback: generate one at a time
+                int[] result = new int[count];
+                for (int i = 0; i < count; i++) {
+                    result[i] = genBuffer();
+                }
+                return result;
+            }
+            try {
+                return (int[]) mhGenBuffers.invokeExact(count);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
         void deleteBuffer(int buffer) {
             try {
                 mhDeleteBuffer.invokeExact(buffer);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        void deleteBuffers(int[] buffers) {
+            if (!hasDeleteBuffers) {
+                // Fallback: delete one at a time
+                for (int buffer : buffers) {
+                    deleteBuffer(buffer);
+                }
+                return;
+            }
+            try {
+                mhDeleteBuffers.invokeExact(buffers);
             } catch (Throwable t) {
                 throw rethrow(t);
             }
@@ -423,6 +588,33 @@ public final class OpenGLManager {
             }
         }
 
+        void invalidateBufferData(int buffer) {
+            if (!hasInvalidateBufferData) return;
+            try {
+                mhInvalidateBufferData.invokeExact(buffer);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        void invalidateBufferSubData(int buffer, long offset, long length) {
+            if (!hasInvalidateBufferSubData) return;
+            try {
+                mhInvalidateBufferSubData.invokeExact(buffer, offset, length);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        int getBufferParameteri(int target, int pname) {
+            if (!hasGetBufferParameteri) return 0;
+            try {
+                return (int) mhGetBufferParameteri.invokeExact(target, pname);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
         void shutdown() {
             if (!hasShutdown) return;
             try {
@@ -482,10 +674,13 @@ public final class OpenGLManager {
     private final boolean hasPersistentMapping;   // GL 4.4+ / extension
     private final boolean hasDSA;                 // GL 4.5+ / extension
 
+    // Raw version string for diagnostics
+    private final String rawVersionString;
+
     private OpenGLManager(Settings s, int detectedGL, int effectiveGL, int opsVer,
                           BufferDispatch buffer, State state,
                           boolean hasMDI, boolean hasPM, boolean hasDSA,
-                          Thread renderThread) {
+                          Thread renderThread, String rawVersionString) {
         this.settings = s;
         this.renderThread = renderThread;
         this.debug = s.debug;
@@ -500,6 +695,8 @@ public final class OpenGLManager {
         this.hasMultiDrawIndirect = hasMDI;
         this.hasPersistentMapping = hasPM;
         this.hasDSA = hasDSA;
+
+        this.rawVersionString = rawVersionString;
     }
 
     // ---------------------------------------------------------------------
@@ -509,7 +706,10 @@ public final class OpenGLManager {
     /**
      * Initialize (must be called after GL context exists).
      * Creates exactly one buffer pipeline instance:
-     * GLBufferOps10/11/12/121/15/20/21/30/33/40/43/44/45/46
+     * GLBufferOps10/11/12/121/15/20/21/30/33/40/42/43/44/45/46
+     * 
+     * @return true if initialization succeeded, false otherwise
+     * @throws RuntimeException if throwOnInitFailure config is true and init fails
      */
     public static boolean init() {
         if (PUBLISHED != null) return true;
@@ -517,11 +717,12 @@ public final class OpenGLManager {
         synchronized (OpenGLManager.class) {
             if (PUBLISHED != null) return true;
 
+            Settings s = null;
             try {
                 OpenGLCallMapper.initialize();
 
                 Config cfg = Config.getInstance();
-                Settings s = new Settings(cfg);
+                s = new Settings(cfg);
 
                 String ver = OpenGLCallMapper.getString(GL_VERSION);
                 int detected = parseGLVersionCode(ver);
@@ -531,7 +732,7 @@ public final class OpenGLManager {
                 Object opsImpl = instantiateBufferOps(opsVer);
 
                 // Detect important advanced capabilities from mapper (infra)
-                // If your OpenGLCallMapper doesn’t expose these, keep them conservative.
+                // If your OpenGLCallMapper doesn't expose these, keep them conservative.
                 boolean hasMDI = safeHas(OpenGLCallMapper.class, "hasFeatureMultiDrawIndirect");
                 boolean hasPM = safeHas(OpenGLCallMapper.class, "hasFeaturePersistentMapping");
                 boolean hasDSA = safeHas(OpenGLCallMapper.class, "hasFeatureDSA");
@@ -542,7 +743,7 @@ public final class OpenGLManager {
 
                 Thread rt = Thread.currentThread();
 
-                OpenGLManager mgr = new OpenGLManager(s, detected, effective, opsVer, dispatch, st, hasMDI, hasPM, hasDSA, rt);
+                OpenGLManager mgr = new OpenGLManager(s, detected, effective, opsVer, dispatch, st, hasMDI, hasPM, hasDSA, rt, ver);
 
                 PUBLISHED = mgr;
                 FAST = mgr;
@@ -550,16 +751,45 @@ public final class OpenGLManager {
                 if (s.debug) {
                     System.out.println("[OpenGLManager] init ok" +
                             " LWJGL=" + LWJGL_VERSION +
-                            " GL=" + ver +
+                            " GL=\"" + ver + "\"" +
                             " detected=" + detected +
                             " effective=" + effective +
-                            " bufferOps=" + opsVer);
+                            " bufferOps=" + opsVer +
+                            " MDI=" + hasMDI +
+                            " PM=" + hasPM +
+                            " DSA=" + hasDSA);
                 }
 
                 return true;
             } catch (Throwable t) {
                 System.err.println("[OpenGLManager] init failed: " + t.getMessage());
                 t.printStackTrace();
+                if (s != null && s.throwOnInitFailure) {
+                    throw new RuntimeException("OpenGLManager initialization failed", t);
+                }
+                return false;
+            }
+        }
+    }
+
+    /**
+     * Initialize with a callback for custom error handling.
+     * 
+     * @param errorCallback called if initialization fails, receives the exception
+     * @return true if initialization succeeded
+     */
+    public static boolean init(java.util.function.Consumer<Throwable> errorCallback) {
+        if (PUBLISHED != null) return true;
+
+        synchronized (OpenGLManager.class) {
+            if (PUBLISHED != null) return true;
+
+            try {
+                return init();
+            } catch (Throwable t) {
+                if (errorCallback != null) {
+                    errorCallback.accept(t);
+                }
                 return false;
             }
         }
@@ -581,6 +811,7 @@ public final class OpenGLManager {
             case 30:  return new GLBufferOps30();
             case 33:  return new GLBufferOps33();
             case 40:  return new GLBufferOps40();
+            case 42:  return new GLBufferOps42();
             case 43:  return new GLBufferOps43();
             case 44:  return new GLBufferOps44();
             case 45:  return new GLBufferOps45();
@@ -591,7 +822,7 @@ public final class OpenGLManager {
 
     private static int chooseBufferOpsVersion(int gl) {
         // The only allowed pipelines:
-        // 10,11,12,121,15,20,21,30,33,40,43,44,45,46
+        // 10,11,12,121,15,20,21,30,33,40,42,43,44,45,46
         if (gl == 121) return 121;
         if (gl <= 10) return 10;
         if (gl == 11) return 11;
@@ -609,8 +840,9 @@ public final class OpenGLManager {
         if (gl == 30 || gl == 31 || gl == 32) return 30;
         if (gl == 33) return 33;
 
-        // 4.0-4.2 -> 40 pipeline
-        if (gl == 40 || gl == 41 || gl == 42) return 40;
+        // 4.0-4.1 -> 40 pipeline
+        if (gl == 40 || gl == 41) return 40;
+        if (gl == 42) return 42;
         if (gl == 43) return 43;
         if (gl == 44) return 44;
         if (gl == 45) return 45;
@@ -620,55 +852,80 @@ public final class OpenGLManager {
     }
 
     // ---------------------------------------------------------------------
-    // Version parsing including 1.2.1
+    // Robust GL version parsing
+    // Handles:
+    //   "3.3.0 NVIDIA 545.29.06"
+    //   "4.6.0 Compatibility Profile Context 23.11.1"
+    //   "OpenGL ES 3.2 Mesa 24.0.0"
+    //   "4.6"
+    //   "1.2.1"
     // ---------------------------------------------------------------------
 
     private static int parseGLVersionCode(String versionString) {
         if (versionString == null || versionString.isEmpty()) return 11;
 
-        int major = 1, minor = 1, patch = 0;
+        // Trim and work on the string
+        String s = versionString.trim();
 
-        int len = versionString.length();
+        // Skip "OpenGL " or "OpenGL ES " prefix if present
+        if (s.startsWith("OpenGL ES ")) {
+            s = s.substring(10);
+        } else if (s.startsWith("OpenGL ")) {
+            s = s.substring(7);
+        }
+
+        // Now extract major.minor[.patch] from the beginning
+        int major = 1, minor = 1, patch = 0;
+        int len = s.length();
         int i = 0;
 
-        major = parseIntAt(versionString, i);
-        i = indexOf(versionString, '.', i);
-        if (i >= 0 && i + 1 < len) {
+        // Parse major
+        int majorStart = i;
+        while (i < len && isDigit(s.charAt(i))) i++;
+        if (i > majorStart) {
+            major = parseIntFast(s, majorStart, i);
+        } else {
+            return 11; // No digits found
+        }
+
+        // Expect '.'
+        if (i < len && s.charAt(i) == '.') {
             i++;
-            minor = parseIntAt(versionString, i);
-            int dot2 = indexOf(versionString, '.', i);
-            if (dot2 >= 0 && dot2 + 1 < len) {
-                patch = parseIntAt(versionString, dot2 + 1);
+            // Parse minor
+            int minorStart = i;
+            while (i < len && isDigit(s.charAt(i))) i++;
+            if (i > minorStart) {
+                minor = parseIntFast(s, minorStart, i);
+            }
+
+            // Check for second '.' (patch version)
+            if (i < len && s.charAt(i) == '.') {
+                i++;
+                int patchStart = i;
+                while (i < len && isDigit(s.charAt(i))) i++;
+                if (i > patchStart) {
+                    patch = parseIntFast(s, patchStart, i);
+                }
             }
         }
 
+        // Special case: GL 1.2.1
         if (major == 1 && minor == 2 && patch == 1) return 121;
+
+        // Normal encoding: major*10 + minor
         return major * 10 + minor;
     }
 
-    private static int parseIntAt(String s, int start) {
-        int len = s.length();
-        int i = start;
-        int val = 0;
-        boolean any = false;
-        while (i < len) {
-            char c = s.charAt(i);
-            if (c < '0' || c > '9') break;
-            any = true;
-            val = val * 10 + (c - '0');
-            i++;
-        }
-        return any ? val : 0;
+    private static boolean isDigit(char c) {
+        return c >= '0' && c <= '9';
     }
 
-    private static int indexOf(String s, char ch, int start) {
-        int len = s.length();
-        for (int i = start; i < len; i++) {
-            if (s.charAt(i) == ch) return i;
-            // stop if we reach whitespace before finding dots
-            if (s.charAt(i) <= ' ') break;
+    private static int parseIntFast(String s, int start, int end) {
+        int val = 0;
+        for (int i = start; i < end; i++) {
+            val = val * 10 + (s.charAt(i) - '0');
         }
-        return -1;
+        return val;
     }
 
     private static int clampToMax(int detected, int max) {
@@ -719,6 +976,28 @@ public final class OpenGLManager {
         state.invalidate();
     }
 
+    /**
+     * Invalidate only buffer binding cache.
+     * Use if external code modifies buffer bindings but not other state.
+     */
+    public void invalidateBufferBindings() {
+        assertRenderThread();
+        for (int i = 0; i < State.BUFFER_TARGET_COUNT; i++) {
+            state.bufferBindings[i] = -1;
+        }
+    }
+
+    /**
+     * Invalidate only texture binding cache.
+     */
+    public void invalidateTextureBindings() {
+        assertRenderThread();
+        state.activeTexture = -1;
+        for (int i = 0; i < state.texture2DBindings.length; i++) {
+            state.texture2DBindings[i] = -1;
+        }
+    }
+
     // ---------------------------------------------------------------------
     // Public: Buffer routing (fastest hot path)
     // ---------------------------------------------------------------------
@@ -728,31 +1007,70 @@ public final class OpenGLManager {
         return buffer.genBuffer();
     }
 
+    /**
+     * Generate multiple buffers at once (batch operation).
+     * More efficient than calling genBuffer() in a loop.
+     */
+    public int[] genBuffers(int count) {
+        assertRenderThread();
+        return buffer.genBuffers(count);
+    }
+
     public void deleteBuffer(int id) {
         assertRenderThread();
         buffer.deleteBuffer(id);
-        // keep cache correct
-        if (state.arrayBuffer == id) state.arrayBuffer = -1;
-        if (state.elementBuffer == id) state.elementBuffer = -1;
+        // Invalidate this buffer from any cached binding
+        for (int i = 0; i < State.BUFFER_TARGET_COUNT; i++) {
+            if (state.bufferBindings[i] == id) {
+                state.bufferBindings[i] = -1;
+            }
+        }
     }
 
     /**
-     * Bind caching here is *very* worth it.
-     * It prevents massive JNI/driver churn.
+     * Delete multiple buffers at once (batch operation).
+     */
+    public void deleteBuffers(int[] buffers) {
+        assertRenderThread();
+        buffer.deleteBuffers(buffers);
+        // Invalidate these buffers from cache
+        for (int bufId : buffers) {
+            for (int i = 0; i < State.BUFFER_TARGET_COUNT; i++) {
+                if (state.bufferBindings[i] == bufId) {
+                    state.bufferBindings[i] = -1;
+                }
+            }
+        }
+    }
+
+    /**
+     * Bind buffer with caching.
+     * Buffer binding is heavily cached because it's one of the most frequent GL calls.
      */
     public void bindBuffer(int target, int id) {
         assertRenderThread();
 
         if (settings.cacheBinds) {
-            if (target == GL_ARRAY_BUFFER) {
-                if (state.arrayBuffer == id) return;
-                state.arrayBuffer = id;
-            } else if (target == GL_ELEMENT_ARRAY_BUFFER) {
-                if (state.elementBuffer == id) return;
-                state.elementBuffer = id;
+            int idx = State.targetToIndex(target);
+            if (idx >= 0) {
+                if (state.bufferBindings[idx] == id) return;
+                state.bufferBindings[idx] = id;
             }
         }
 
+        buffer.bindBuffer(target, id);
+    }
+
+    /**
+     * Force bind buffer, bypassing cache.
+     * Use when you know external code may have modified the binding.
+     */
+    public void bindBufferForce(int target, int id) {
+        assertRenderThread();
+        int idx = State.targetToIndex(target);
+        if (idx >= 0) {
+            state.bufferBindings[idx] = id;
+        }
         buffer.bindBuffer(target, id);
     }
 
@@ -792,9 +1110,20 @@ public final class OpenGLManager {
     }
 
     /**
-     * mapBuffer:
-     * Some pipelines expose mapBuffer(target, access) and some mapBuffer(target, access, length).
-     * Manager exposes the superset; if pipeline needs length we pass it.
+     * Map a buffer for CPU access.
+     * 
+     * <p>The {@code lengthIfNeeded} parameter is used by some pipeline implementations
+     * (particularly LWJGL3-based ones like GL 1.5+) that require knowing the buffer size
+     * for mapping. Pre-1.5 pipelines and some LWJGL2 paths ignore this parameter.</p>
+     * 
+     * <p>If you don't know the buffer size, you can query it first with
+     * {@link #getBufferParameteri(int, int)} using GL_BUFFER_SIZE, or pass 0
+     * if your pipeline doesn't require it.</p>
+     *
+     * @param target the buffer target (e.g., GL_ARRAY_BUFFER)
+     * @param access the access mode (e.g., GL_READ_ONLY, GL_WRITE_ONLY, GL_READ_WRITE)
+     * @param lengthIfNeeded buffer size hint, may be ignored by some pipelines
+     * @return a ByteBuffer view of the mapped memory, or null if mapping failed
      */
     public ByteBuffer mapBuffer(int target, int access, long lengthIfNeeded) {
         assertRenderThread();
@@ -802,9 +1131,20 @@ public final class OpenGLManager {
     }
 
     /**
-     * mapBufferRange:
-     * Returns null if pipeline does not support it.
-     * If strict, throws.
+     * Map a range of a buffer for CPU access.
+     * 
+     * <p>This is the preferred mapping method for GL 3.0+ as it allows partial
+     * mapping and more control over synchronization via access flags.</p>
+     * 
+     * <p>Returns null if the pipeline does not support mapBufferRange (pre-GL 3.0).
+     * If {@code strictNoEmulation} is enabled, throws instead of returning null.</p>
+     *
+     * @param target the buffer target
+     * @param offset byte offset into the buffer
+     * @param length number of bytes to map
+     * @param accessFlags bitfield of GL_MAP_READ_BIT, GL_MAP_WRITE_BIT, etc.
+     * @return mapped ByteBuffer, or null if unsupported
+     * @throws UnsupportedOperationException if strict mode and unsupported
      */
     public ByteBuffer mapBufferRange(int target, long offset, long length, int accessFlags) {
         assertRenderThread();
@@ -821,9 +1161,11 @@ public final class OpenGLManager {
     }
 
     /**
-     * Flush mapped range:
-     * No-op if pipeline doesn’t expose it.
-     * If strict and requested, throw.
+     * Flush a portion of a mapped buffer range.
+     * 
+     * <p>Only valid after mapping with GL_MAP_FLUSH_EXPLICIT_BIT.
+     * No-op if pipeline doesn't support it (pre-GL 3.0).
+     * Throws in strict mode if unsupported.</p>
      */
     public void flushMappedBufferRange(int target, long offset, long length) {
         assertRenderThread();
@@ -834,9 +1176,9 @@ public final class OpenGLManager {
     }
 
     /**
-     * Copy buffer sub data:
-     * No-op if pipeline doesn’t expose it.
-     * If strict, throw.
+     * Copy data between buffers.
+     * 
+     * <p>Requires GL 3.1+. No-op if unsupported unless strict mode.</p>
      */
     public void copyBufferSubData(int readTarget, int writeTarget, long readOffset, long writeOffset, long size) {
         assertRenderThread();
@@ -844,6 +1186,44 @@ public final class OpenGLManager {
             throw new UnsupportedOperationException("copyBufferSubData not supported by pipeline GLBufferOps" + bufferOpsVersion);
         }
         buffer.copyBufferSubData(readTarget, writeTarget, readOffset, writeOffset, size);
+    }
+
+    /**
+     * Invalidate entire buffer contents (GL 4.3+).
+     * Signals to the driver that previous contents are no longer needed.
+     */
+    public void invalidateBufferData(int buffer) {
+        assertRenderThread();
+        if (!this.buffer.hasInvalidateBufferData) {
+            if (settings.strictNoEmulation) {
+                throw new UnsupportedOperationException("invalidateBufferData not supported by pipeline GLBufferOps" + bufferOpsVersion);
+            }
+            return;
+        }
+        this.buffer.invalidateBufferData(buffer);
+    }
+
+    /**
+     * Invalidate a range of buffer contents (GL 4.3+).
+     */
+    public void invalidateBufferSubData(int buffer, long offset, long length) {
+        assertRenderThread();
+        if (!this.buffer.hasInvalidateBufferSubData) {
+            if (settings.strictNoEmulation) {
+                throw new UnsupportedOperationException("invalidateBufferSubData not supported by pipeline GLBufferOps" + bufferOpsVersion);
+            }
+            return;
+        }
+        this.buffer.invalidateBufferSubData(buffer, offset, length);
+    }
+
+    /**
+     * Query buffer parameter.
+     * Common pnames: GL_BUFFER_SIZE (0x8764), GL_BUFFER_USAGE (0x8765), GL_BUFFER_MAPPED (0x88BC)
+     */
+    public int getBufferParameteri(int target, int pname) {
+        assertRenderThread();
+        return buffer.getBufferParameteri(target, pname);
     }
 
     // ---------------------------------------------------------------------
@@ -915,14 +1295,37 @@ public final class OpenGLManager {
         OpenGLCallMapper.disable(cap);
     }
 
+    /**
+     * Check if a capability is currently enabled (cached).
+     * Returns accurate value only if caching is enabled and state hasn't been
+     * modified externally. Returns false for unknown capabilities.
+     */
+    public boolean isEnabled(int cap) {
+        if (!settings.cacheCommonState) {
+            return OpenGLCallMapper.isEnabled(cap);
+        }
+        int bit = capToBit(cap);
+        if (bit < 0) {
+            return OpenGLCallMapper.isEnabled(cap);
+        }
+        return (state.enableBits & (1L << bit)) != 0L;
+    }
+
     private static int capToBit(int cap) {
         switch (cap) {
-            case GL_DEPTH_TEST:   return State.BIT_DEPTH;
-            case GL_BLEND:        return State.BIT_BLEND;
-            case GL_CULL_FACE:    return State.BIT_CULL;
-            case GL_SCISSOR_TEST: return State.BIT_SCISS;
-            case GL_STENCIL_TEST: return State.BIT_STEN;
-            default:              return -1;
+            case GL_DEPTH_TEST:              return State.BIT_DEPTH;
+            case GL_BLEND:                   return State.BIT_BLEND;
+            case GL_CULL_FACE:               return State.BIT_CULL;
+            case GL_SCISSOR_TEST:            return State.BIT_SCISS;
+            case GL_STENCIL_TEST:            return State.BIT_STEN;
+            case GL_ALPHA_TEST:              return State.BIT_ALPHA;
+            case GL_POLYGON_OFFSET_FILL:     return State.BIT_POLY_OFFSET;
+            case GL_MULTISAMPLE:             return State.BIT_MULTISAMPLE;
+            case GL_SAMPLE_ALPHA_TO_COVERAGE:return State.BIT_SAMPLE_ALPHA;
+            case GL_LINE_SMOOTH:             return State.BIT_LINE_SMOOTH;
+            case GL_POLYGON_SMOOTH:          return State.BIT_POLY_SMOOTH;
+            case GL_TEXTURE_2D:              return State.BIT_TEX2D;
+            default:                         return -1;
         }
     }
 
@@ -968,6 +1371,97 @@ public final class OpenGLManager {
         OpenGLCallMapper.blendFuncSeparate(srcRGB, dstRGB, srcA, dstA);
     }
 
+    public void blendEquation(int mode) {
+        assertRenderThread();
+        if (settings.cacheCommonState && 
+                state.blendEquationRGB == mode && state.blendEquationA == mode) {
+            return;
+        }
+        state.blendEquationRGB = mode;
+        state.blendEquationA = mode;
+        OpenGLCallMapper.blendEquation(mode);
+    }
+
+    public void blendEquationSeparate(int modeRGB, int modeAlpha) {
+        assertRenderThread();
+        if (settings.cacheCommonState &&
+                state.blendEquationRGB == modeRGB && state.blendEquationA == modeAlpha) {
+            return;
+        }
+        state.blendEquationRGB = modeRGB;
+        state.blendEquationA = modeAlpha;
+        OpenGLCallMapper.blendEquationSeparate(modeRGB, modeAlpha);
+    }
+
+    // ---------------------------------------------------------------------
+    // Public: VAO binding (GL 3.0+)
+    // ---------------------------------------------------------------------
+
+    public void bindVertexArray(int vao) {
+        assertRenderThread();
+        if (settings.cacheBinds && state.boundVAO == vao) return;
+        state.boundVAO = vao;
+        OpenGLCallMapper.bindVertexArray(vao);
+    }
+
+    // ---------------------------------------------------------------------
+    // Public: Program binding
+    // ---------------------------------------------------------------------
+
+    public void useProgram(int program) {
+        assertRenderThread();
+        if (settings.cacheBinds && state.boundProgram == program) return;
+        state.boundProgram = program;
+        OpenGLCallMapper.useProgram(program);
+    }
+
+    // ---------------------------------------------------------------------
+    // Public: Framebuffer binding
+    // ---------------------------------------------------------------------
+
+    public void bindFramebuffer(int target, int framebuffer) {
+        assertRenderThread();
+        // 0x8CA8 = GL_READ_FRAMEBUFFER, 0x8CA9 = GL_DRAW_FRAMEBUFFER, 0x8D40 = GL_FRAMEBUFFER
+        if (settings.cacheBinds) {
+            if (target == 0x8D40) { // GL_FRAMEBUFFER binds both
+                if (state.boundDrawFBO == framebuffer && state.boundReadFBO == framebuffer) return;
+                state.boundDrawFBO = framebuffer;
+                state.boundReadFBO = framebuffer;
+            } else if (target == 0x8CA9) { // GL_DRAW_FRAMEBUFFER
+                if (state.boundDrawFBO == framebuffer) return;
+                state.boundDrawFBO = framebuffer;
+            } else if (target == 0x8CA8) { // GL_READ_FRAMEBUFFER
+                if (state.boundReadFBO == framebuffer) return;
+                state.boundReadFBO = framebuffer;
+            }
+        }
+        OpenGLCallMapper.bindFramebuffer(target, framebuffer);
+    }
+
+    // ---------------------------------------------------------------------
+    // Public: Active texture unit
+    // ---------------------------------------------------------------------
+
+    public void activeTexture(int texture) {
+        assertRenderThread();
+        if (settings.cacheBinds && state.activeTexture == texture) return;
+        state.activeTexture = texture;
+        OpenGLCallMapper.activeTexture(texture);
+    }
+
+    public void bindTexture(int target, int texture) {
+        assertRenderThread();
+        // Only cache GL_TEXTURE_2D for the first 16 units
+        if (settings.cacheBinds && target == GL_TEXTURE_2D) {
+            int unit = state.activeTexture - 0x84C0; // GL_TEXTURE0 = 0x84C0
+            if (unit >= 0 && unit < state.texture2DBindings.length) {
+                if (state.texture2DBindings[unit] == texture) return;
+                state.texture2DBindings[unit] = texture;
+            }
+        }
+        OpenGLCallMapper.bindTexture(target, texture);
+    }
+
     // ---------------------------------------------------------------------
     // Lightweight diagnostics / getters
     // ---------------------------------------------------------------------
@@ -975,13 +1469,37 @@ public final class OpenGLManager {
     public int getDetectedGLVersion() { return detectedGL; }
     public int getEffectiveGLVersion() { return effectiveGL; }
     public int getBufferOpsVersion() { return bufferOpsVersion; }
+    public String getRawVersionString() { return rawVersionString; }
 
     public boolean isDSAAvailable() { return hasDSA; }
     public boolean isPersistentMappingAvailable() { return hasPersistentMapping; }
     public boolean isMultiDrawIndirectAvailable() { return hasMultiDrawIndirect; }
 
+    public boolean isCacheBindsEnabled() { return settings.cacheBinds; }
+    public boolean isCacheCommonStateEnabled() { return settings.cacheCommonState; }
+    public boolean isStrictNoEmulation() { return settings.strictNoEmulation; }
+    public boolean isDebugEnabled() { return debug; }
+
+    /**
+     * Get a human-readable description of the current configuration.
+     */
+    public String getConfigSummary() {
+        return String.format(
+            "OpenGLManager[LWJGL=%d, GL=%s, detected=%d, effective=%d, ops=%d, " +
+            "MDI=%b, PM=%b, DSA=%b, cacheBinds=%b, cacheState=%b, strict=%b]",
+            LWJGL_VERSION, rawVersionString, detectedGL, effectiveGL, bufferOpsVersion,
+            hasMultiDrawIndirect, hasPersistentMapping, hasDSA,
+            settings.cacheBinds, settings.cacheCommonState, settings.strictNoEmulation
+        );
+    }
+
     // ---------------------------------------------------------------------
     // Shutdown: no leaks (pipelines + mapper caches)
+    // 
+    // NOTE: This assumes single GL context usage. If multiple contexts exist
+    // (rare in MC), calling shutdown() will affect the global state. Each
+    // context would require its own manager instance, which is not currently
+    // supported.
     // ---------------------------------------------------------------------
 
     public void shutdown() {
@@ -1003,5 +1521,20 @@ public final class OpenGLManager {
             PUBLISHED = null;
             FAST = null;
         }
+    }
+
+    /**
+     * Check if currently on the render thread.
+     * Useful for external code that wants to verify thread safety.
+     */
+    public boolean isRenderThread() {
+        return Thread.currentThread() == renderThread;
+    }
+
+    /**
+     * Get the render thread this manager was initialized on.
+     */
+    public Thread getRenderThread() {
+        return renderThread;
     }
 }
