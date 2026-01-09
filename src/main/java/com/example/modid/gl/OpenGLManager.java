@@ -1,739 +1,1007 @@
-package com.example.modid.gl.mapping;
+package com.example.modid.gl;
 
-import com.example.modid.gl.GLCapabilities;
-import org.lwjgl.opengl.*;
+import com.example.modid.Config;
+import com.example.modid.gl.mapping.OpenGLCallMapper;
 
+import com.example.modid.gl.buffer.ops.GLBufferOps10;
+import com.example.modid.gl.buffer.ops.GLBufferOps11;
+import com.example.modid.gl.buffer.ops.GLBufferOps12;
+import com.example.modid.gl.buffer.ops.GLBufferOps121;
+import com.example.modid.gl.buffer.ops.GLBufferOps15;
+import com.example.modid.gl.buffer.ops.GLBufferOps20;
+import com.example.modid.gl.buffer.ops.GLBufferOps21;
+import com.example.modid.gl.buffer.ops.GLBufferOps30;
+import com.example.modid.gl.buffer.ops.GLBufferOps33;
+import com.example.modid.gl.buffer.ops.GLBufferOps40;
+import com.example.modid.gl.buffer.ops.GLBufferOps43;
+import com.example.modid.gl.buffer.ops.GLBufferOps44;
+import com.example.modid.gl.buffer.ops.GLBufferOps45;
+import com.example.modid.gl.buffer.ops.GLBufferOps46;
+
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 
 /**
- * Comprehensive OpenGL call mapping across all versions
- * 
- * Maps legacy calls to best available modern equivalent:
- * GL 1.1 → GL 1.5 → GL 2.0 → GL 3.0 → GL 3.1 → GL 3.3 → GL 4.0 → GL 4.2 → GL 4.3 → GL 4.5 → GL 4.6
+ * OpenGLManager
+ *
+ * The ultra-fast central dispatcher:
+ * - Receives GL calls from the game (MC 1.12.2 or any caller)
+ * - Chooses the *single* best pipeline at init time
+ * - Routes calls to the chosen pipeline with near-zero overhead
+ * - Uses OpenGLCallMapper as infrastructure (LWJGL2/3 separation, extensions, translation)
+ *
+ * HARD RULES IMPLEMENTED:
+ * - No per-call GL version branching (only init-time selection)
+ * - No per-call allocation
+ * - No "emulation" of missing features at manager level
+ *   (manager either routes to pipeline/mapper, or throws if strict)
+ *
+ * IMPORTANT:
+ * - This manager assumes the game runs GL on a single render thread.
+ * - If vanilla/other mods call GL directly (bypassing manager), call invalidateState()
+ *   before your rendering pass to avoid state desync.
  */
-public class OpenGLCallMapper {
-    
-    // ========================================================================
-    // TEXTURE OPERATIONS
-    // ========================================================================
-    
-    /**
-     * glBindTexture mapping
-     * GL 1.1: glBindTexture(target, texture)
-     * GL 4.5: glBindTextureUnit(unit, texture) [DSA - no target needed]
-     */
-    public static void bindTexture(int target, int texture) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            // GL 4.5 DSA: Can bind directly to specific unit
-            // But requires knowing which unit - for now use legacy
-            GL11.glBindTexture(target, texture);
-        } else {
-            // GL 1.1+: Standard bind
-            GL11.glBindTexture(target, texture);
-        }
+public final class OpenGLManager {
+
+    // ---------------------------------------------------------------------
+    // Safe publication
+    // ---------------------------------------------------------------------
+
+    private static volatile OpenGLManager PUBLISHED;
+    private static OpenGLManager FAST;
+
+    public static boolean isInitialized() { return PUBLISHED != null; }
+
+    /** Safe accessor (one volatile read). */
+    public static OpenGLManager getSafe() {
+        OpenGLManager m = PUBLISHED;
+        if (m == null) throw new IllegalStateException("OpenGLManager not initialized. Call OpenGLManager.init() after GL context exists.");
+        return m;
     }
-    
-    /**
-     * glActiveTexture + glBindTexture mapping
-     * GL 1.1: Multi-step (glActiveTexture + glBindTexture)
-     * GL 4.5: glBindTextureUnit(unit, texture) [Single call]
-     */
-    public static void bindTextureToUnit(int unit, int texture) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            // GL 4.5 DSA: Direct unit binding
-            GL45.glBindTextureUnit(unit, texture);
-        } else if (GLCapabilities.GL13) {
-            // GL 1.3+: Two-step binding
-            GL13.glActiveTexture(GL13.GL_TEXTURE0 + unit);
-            GL11.glBindTexture(GL11.GL_TEXTURE_2D, texture);
-        } else {
-            // GL 1.1: No multi-texturing, ignore unit
-            GL11.glBindTexture(GL11.GL_TEXTURE_2D, texture);
-        }
-    }
-    
-    /**
-     * glTexImage2D mapping
-     * GL 1.1: glTexImage2D(...)
-     * GL 4.2: glTexStorage2D(...) [Immutable storage, better performance]
-     * GL 4.5: glTextureStorage2D(...) [DSA version]
-     */
-    public static void texImage2D(int target, int level, int internalFormat, int width, int height, int border, int format, int type, ByteBuffer data) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA && level == 0) {
-            // GL 4.5 DSA: Use texture storage (requires texture ID, not target)
-            // For now, fall back since we'd need texture ID
-            GL11.glTexImage2D(target, level, internalFormat, width, height, border, format, type, data);
-        } else if (GLCapabilities.GL42 && level == 0) {
-            // GL 4.2: Immutable storage (only for base level)
-            GL42.glTexStorage2D(target, 1, internalFormat, width, height);
-            if (data != null) {
-                GL11.glTexSubImage2D(target, 0, 0, 0, width, height, format, type, data);
+
+    /** Fast accessor (no volatile read). Use ONLY after init(). */
+    public static OpenGLManager getFast() { return FAST; }
+
+    // ---------------------------------------------------------------------
+    // LWJGL detection (manager-level only for info / diagnostics)
+    // Mapper does the real separation.
+    // ---------------------------------------------------------------------
+
+    public static final int LWJGL_UNKNOWN = 0;
+    public static final int LWJGL_2 = 2;
+    public static final int LWJGL_3 = 3;
+
+    public static final int LWJGL_VERSION;
+    static {
+        int v = LWJGL_UNKNOWN;
+        try {
+            Class.forName("org.lwjgl.Version");
+            v = LWJGL_3;
+        } catch (Throwable ignored) {
+            try {
+                Class.forName("org.lwjgl.Sys");
+                v = LWJGL_2;
+            } catch (Throwable ignored2) {
+                v = LWJGL_UNKNOWN;
             }
-        } else {
-            // GL 1.1+: Standard mutable storage
-            GL11.glTexImage2D(target, level, internalFormat, width, height, border, format, type, data);
+        }
+        LWJGL_VERSION = v;
+    }
+
+    // ---------------------------------------------------------------------
+    // Minimal config snapshot (no references; init-time only)
+    // Uses reflection-friendly getters to avoid hard dependency on exact Config API.
+    // ---------------------------------------------------------------------
+
+    private static final class Settings {
+        final int maxGL;                 // max GL version to use (e.g. 33, 45, 46)
+        final boolean debug;             // debug logging
+        final boolean strictNoEmulation; // if true: unsupported advanced calls throw
+        final boolean cacheBinds;        // bind caching (huge CPU win)
+        final boolean cacheCommonState;  // enable/disable + depth/blend caching
+        final boolean enableMultiDrawIndirect; // allow MultiDrawIndirect usage if supported
+        final boolean enablePersistentMapping; // allow persistent map usage (pipelines may use)
+        final boolean enableDSA;         // allow DSA usage (pipelines may use)
+
+        Settings(Config cfg) {
+            this.maxGL = getInt(cfg, "getMaxGLVersion", 46);
+            this.debug = getBool(cfg, "getDebugMode", false);
+
+            // Default to your rule: translation only, no emulation.
+            this.strictNoEmulation = getBool(cfg, "getStrictNoEmulation", true);
+
+            this.cacheBinds = getBool(cfg, "getCacheBinds", true);
+            this.cacheCommonState = getBool(cfg, "getCacheCommonState", true);
+
+            this.enableMultiDrawIndirect = getBool(cfg, "getUseMultiDrawIndirect", true);
+            this.enablePersistentMapping = getBool(cfg, "getUsePersistentMapping", true);
+            this.enableDSA = getBool(cfg, "getUseDSA", true);
+        }
+
+        private static boolean getBool(Object o, String method, boolean def) {
+            try {
+                return (Boolean) o.getClass().getMethod(method).invoke(o);
+            } catch (Throwable t) {
+                return def;
+            }
+        }
+
+        private static int getInt(Object o, String method, int def) {
+            try {
+                return (Integer) o.getClass().getMethod(method).invoke(o);
+            } catch (Throwable t) {
+                return def;
+            }
         }
     }
-    
-    /**
-     * glTexSubImage2D mapping
-     * GL 1.1: glTexSubImage2D(target, ...)
-     * GL 4.5: glTextureSubImage2D(texture, ...) [DSA - no binding]
-     */
-    public static void texSubImage2D(int target, int level, int xoffset, int yoffset, int width, int height, int format, int type, ByteBuffer data) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            // Would need texture ID for DSA
-            GL11.glTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, data);
-        } else {
-            // GL 1.1+
-            GL11.glTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, data);
+
+    // ---------------------------------------------------------------------
+    // GL constants (no LWJGL dependency)
+    // ---------------------------------------------------------------------
+
+    public static final int GL_VERSION = 0x1F02;
+
+    public static final int GL_ARRAY_BUFFER = 0x8892;
+    public static final int GL_ELEMENT_ARRAY_BUFFER = 0x8893;
+    public static final int GL_COPY_READ_BUFFER = 0x8F36;
+    public static final int GL_COPY_WRITE_BUFFER = 0x8F37;
+
+    public static final int GL_DEPTH_TEST = 0x0B71;
+    public static final int GL_BLEND = 0x0BE2;
+    public static final int GL_CULL_FACE = 0x0B44;
+    public static final int GL_SCISSOR_TEST = 0x0C11;
+    public static final int GL_STENCIL_TEST = 0x0B90;
+
+    // ---------------------------------------------------------------------
+    // Tiny state cache (single-thread assumed)
+    // ---------------------------------------------------------------------
+
+    private static final class State {
+        int arrayBuffer = -1;
+        int elementBuffer = -1;
+        long enableBits = 0L;
+
+        int depthFunc = -1;
+        boolean depthMask = true;
+
+        int blendSrcRGB = -1, blendDstRGB = -1, blendSrcA = -1, blendDstA = -1;
+
+        static final int BIT_DEPTH = 0;
+        static final int BIT_BLEND = 1;
+        static final int BIT_CULL  = 2;
+        static final int BIT_SCISS = 3;
+        static final int BIT_STEN  = 4;
+
+        void invalidate() {
+            arrayBuffer = -1;
+            elementBuffer = -1;
+            enableBits = 0L;
+            depthFunc = -1;
+            depthMask = true;
+            blendSrcRGB = blendDstRGB = blendSrcA = blendDstA = -1;
         }
     }
-    
-    /**
-     * glGenerateMipmap mapping
-     * GL 3.0: glGenerateMipmap(target)
-     * GL 4.5: glGenerateTextureMipmap(texture) [DSA]
-     */
-    public static void generateMipmap(int target) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            // Would need texture ID
-            GL30.glGenerateMipmap(target);
-        } else if (GLCapabilities.GL30) {
-            // GL 3.0+
-            GL30.glGenerateMipmap(target);
-        } else {
-            // No automatic mipmap generation in GL < 3.0
-            // Would need manual mipmap generation
-        }
-    }
-    
-    // ========================================================================
-    // BUFFER OPERATIONS
-    // ========================================================================
-    
-    /**
-     * glGenBuffers mapping
-     * GL 1.5: glGenBuffers()
-     * GL 4.5: glCreateBuffers() [DSA - pre-initialized]
-     */
-    public static int genBuffer() {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            // GL 4.5 DSA: Create directly
-            return GL45.glCreateBuffers();
-        } else if (GLCapabilities.GL15) {
-            // GL 1.5+
-            return GL15.glGenBuffers();
-        } else {
-            throw new UnsupportedOperationException("VBO not supported");
-        }
-    }
-    
-    /**
-     * glBindBuffer mapping
-     * GL 1.5: glBindBuffer(target, buffer)
-     * GL 4.5: No binding needed with DSA, but still supported
-     */
-    public static void bindBuffer(int target, int buffer) {
-        // Always use standard bind (DSA operations don't need it)
-        if (GLCapabilities.GL15) {
-            GL15.glBindBuffer(target, buffer);
-        }
-    }
-    
-    /**
-     * glBufferData mapping
-     * GL 1.5: glBufferData(target, data, usage)
-     * GL 4.4: glBufferStorage(target, data, flags) [Immutable, persistent mapping]
-     * GL 4.5: glNamedBufferData/glNamedBufferStorage(buffer, ...) [DSA]
-     */
-    public static void bufferData(int target, long size, int usage) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            // GL 4.5 DSA: Would need buffer ID
-            // For persistent mapping
-            if (GLCapabilities.hasPersistentMapping) {
-                int flags = translateUsageToStorageFlags(usage);
-                GL44.glBufferStorage(target, size, flags);
+
+    // ---------------------------------------------------------------------
+    // Buffer pipeline dispatch WITHOUT requiring pipeline classes to implement an interface.
+    // Uses MethodHandles bound at init:
+    // - No per-call reflection
+    // - No per-call branching
+    // - Monomorphic invokeExact on constant handles (JIT can optimize)
+    // ---------------------------------------------------------------------
+
+    private static final class BufferDispatch {
+        final Object impl;
+
+        final MethodHandle mhGenBuffer; // ()int
+        final MethodHandle mhDeleteBuffer; // (int)void
+        final MethodHandle mhBindBuffer; // (int,int)void
+
+        final MethodHandle mhBufferDataSize; // (int,long,int)void
+        final MethodHandle mhBufferDataBB;   // (int,ByteBuffer,int)void
+        final MethodHandle mhBufferDataFB;   // (int,FloatBuffer,int)void
+        final MethodHandle mhBufferDataIB;   // (int,IntBuffer,int)void
+
+        final MethodHandle mhBufferSubDataBB; // (int,long,ByteBuffer)void
+        final MethodHandle mhBufferSubDataFB; // (int,long,FloatBuffer)void
+        final MethodHandle mhBufferSubDataIB; // (int,long,IntBuffer)void
+
+        final MethodHandle mhMapBuffer;       // either (int,int,long)ByteBuffer OR (int,int)ByteBuffer
+        final boolean mapBufferHasLength;
+
+        final MethodHandle mhMapBufferRange;  // (int,long,long,int)ByteBuffer (optional)
+        final boolean hasMapBufferRange;
+
+        final MethodHandle mhUnmapBuffer;     // either (int)boolean OR (int)void
+        final boolean unmapReturnsBoolean;
+
+        final MethodHandle mhFlushMappedRange; // (int,long,long)void (optional)
+        final boolean hasFlushMappedRange;
+
+        final MethodHandle mhCopyBufferSubData; // (int,int,long,long,long)void (optional)
+        final boolean hasCopyBufferSubData;
+
+        final MethodHandle mhShutdown; // ()void (optional)
+        final boolean hasShutdown;
+
+        BufferDispatch(Object impl, MethodHandles.Lookup lookup) {
+            this.impl = impl;
+
+            // Required core methods (must exist)
+            mhGenBuffer = bindRequired(lookup, impl, "genBuffer", MethodType.methodType(int.class));
+            mhDeleteBuffer = bindRequired(lookup, impl, "deleteBuffer", MethodType.methodType(void.class, int.class));
+            mhBindBuffer = bindRequired(lookup, impl, "bindBuffer", MethodType.methodType(void.class, int.class, int.class));
+
+            mhBufferDataSize = bindRequired(lookup, impl, "bufferData", MethodType.methodType(void.class, int.class, long.class, int.class));
+            mhBufferDataBB = bindRequired(lookup, impl, "bufferData", MethodType.methodType(void.class, int.class, ByteBuffer.class, int.class));
+            mhBufferDataFB = bindRequired(lookup, impl, "bufferData", MethodType.methodType(void.class, int.class, FloatBuffer.class, int.class));
+            mhBufferDataIB = bindRequired(lookup, impl, "bufferData", MethodType.methodType(void.class, int.class, IntBuffer.class, int.class));
+
+            mhBufferSubDataBB = bindRequired(lookup, impl, "bufferSubData", MethodType.methodType(void.class, int.class, long.class, ByteBuffer.class));
+            mhBufferSubDataFB = bindRequired(lookup, impl, "bufferSubData", MethodType.methodType(void.class, int.class, long.class, FloatBuffer.class));
+            mhBufferSubDataIB = bindRequired(lookup, impl, "bufferSubData", MethodType.methodType(void.class, int.class, long.class, IntBuffer.class));
+
+            // mapBuffer: try (int,int,long)->ByteBuffer, else (int,int)->ByteBuffer
+            MethodHandle mapA = bindOptional(lookup, impl, "mapBuffer",
+                    MethodType.methodType(ByteBuffer.class, int.class, int.class, long.class));
+            if (mapA != null) {
+                mhMapBuffer = mapA;
+                mapBufferHasLength = true;
             } else {
-                GL15.glBufferData(target, size, usage);
+                MethodHandle mapB = bindOptional(lookup, impl, "mapBuffer",
+                        MethodType.methodType(ByteBuffer.class, int.class, int.class));
+                mhMapBuffer = requireNonNull(mapB, "mapBuffer");
+                mapBufferHasLength = false;
             }
-        } else if (GLCapabilities.GL44 && GLCapabilities.hasPersistentMapping) {
-            // GL 4.4: Immutable storage
-            int flags = translateUsageToStorageFlags(usage);
-            GL44.glBufferStorage(target, size, flags);
-        } else if (GLCapabilities.GL15) {
-            // GL 1.5: Mutable storage
-            GL15.glBufferData(target, size, usage);
-        }
-    }
-    
-    public static void bufferData(int target, ByteBuffer data, int usage) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            if (GLCapabilities.hasPersistentMapping) {
-                int flags = translateUsageToStorageFlags(usage);
-                GL44.glBufferStorage(target, data, flags);
+
+            // mapBufferRange optional (GL 3.0+)
+            MethodHandle mbr = bindOptional(lookup, impl, "mapBufferRange",
+                    MethodType.methodType(ByteBuffer.class, int.class, long.class, long.class, int.class));
+            mhMapBufferRange = mbr;
+            hasMapBufferRange = (mbr != null);
+
+            // unmapBuffer: try boolean return, else void
+            MethodHandle unA = bindOptional(lookup, impl, "unmapBuffer",
+                    MethodType.methodType(boolean.class, int.class));
+            if (unA != null) {
+                mhUnmapBuffer = unA;
+                unmapReturnsBoolean = true;
             } else {
-                GL15.glBufferData(target, data, usage);
+                MethodHandle unB = bindOptional(lookup, impl, "unmapBuffer",
+                        MethodType.methodType(void.class, int.class));
+                mhUnmapBuffer = requireNonNull(unB, "unmapBuffer");
+                unmapReturnsBoolean = false;
             }
-        } else if (GLCapabilities.GL44 && GLCapabilities.hasPersistentMapping) {
-            int flags = translateUsageToStorageFlags(usage);
-            GL44.glBufferStorage(target, data, flags);
-        } else if (GLCapabilities.GL15) {
-            GL15.glBufferData(target, data, usage);
+
+            MethodHandle flush = bindOptional(lookup, impl, "flushMappedBufferRange",
+                    MethodType.methodType(void.class, int.class, long.class, long.class));
+            mhFlushMappedRange = flush;
+            hasFlushMappedRange = (flush != null);
+
+            MethodHandle copy = bindOptional(lookup, impl, "copyBufferSubData",
+                    MethodType.methodType(void.class, int.class, int.class, long.class, long.class, long.class));
+            mhCopyBufferSubData = copy;
+            hasCopyBufferSubData = (copy != null);
+
+            MethodHandle shut = bindOptional(lookup, impl, "shutdown",
+                    MethodType.methodType(void.class));
+            mhShutdown = shut;
+            hasShutdown = (shut != null);
         }
-    }
-    
-    /**
-     * glBufferSubData mapping
-     * GL 1.5: glBufferSubData(target, offset, data)
-     * GL 4.5: glNamedBufferSubData(buffer, offset, data) [DSA - no binding]
-     */
-    public static void bufferSubData(int target, long offset, ByteBuffer data) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            // Would need buffer ID for DSA
-            GL15.glBufferSubData(target, offset, data);
-        } else if (GLCapabilities.GL15) {
-            GL15.glBufferSubData(target, offset, data);
-        }
-    }
-    
-    /**
-     * Named buffer operations (requires buffer ID)
-     */
-    public static void namedBufferData(int buffer, long size, int usage) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            if (GLCapabilities.hasPersistentMapping) {
-                int flags = translateUsageToStorageFlags(usage);
-                GL45.glNamedBufferStorage(buffer, size, flags);
-            } else {
-                GL45.glNamedBufferData(buffer, size, usage);
-            }
-        } else {
-            // Fallback: bind then use standard call
-            GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, buffer);
-            bufferData(GL15.GL_ARRAY_BUFFER, size, usage);
-        }
-    }
-    
-    public static void namedBufferSubData(int buffer, long offset, ByteBuffer data) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            GL45.glNamedBufferSubData(buffer, offset, data);
-        } else {
-            GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, buffer);
-            GL15.glBufferSubData(GL15.GL_ARRAY_BUFFER, offset, data);
-        }
-    }
-    
-    /**
-     * glCopyBufferSubData mapping
-     * GL 3.1: glCopyBufferSubData(readTarget, writeTarget, ...)
-     * GL 4.5: glCopyNamedBufferSubData(readBuffer, writeBuffer, ...) [DSA]
-     */
-    public static void copyBufferSubData(int readTarget, int writeTarget, long readOffset, long writeOffset, long size) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            // Would need buffer IDs for DSA
-            GL31.glCopyBufferSubData(readTarget, writeTarget, readOffset, writeOffset, size);
-        } else if (GLCapabilities.GL31) {
-            GL31.glCopyBufferSubData(readTarget, writeTarget, readOffset, writeOffset, size);
-        } else if (GLCapabilities.GL15) {
-            // Manual copy via map/unmap
-            GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, readTarget);
-            ByteBuffer src = GL15.glMapBuffer(GL15.GL_ARRAY_BUFFER, GL15.GL_READ_ONLY, size, null);
-            
-            GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, writeTarget);
-            GL15.glBufferSubData(GL15.GL_ARRAY_BUFFER, writeOffset, src);
-            
-            GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, readTarget);
-            GL15.glUnmapBuffer(GL15.GL_ARRAY_BUFFER);
-        }
-    }
-    
-    public static void copyNamedBufferSubData(int readBuffer, int writeBuffer, long readOffset, long writeOffset, long size) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            GL45.glCopyNamedBufferSubData(readBuffer, writeBuffer, readOffset, writeOffset, size);
-        } else if (GLCapabilities.GL31) {
-            GL15.glBindBuffer(GL31.GL_COPY_READ_BUFFER, readBuffer);
-            GL15.glBindBuffer(GL31.GL_COPY_WRITE_BUFFER, writeBuffer);
-            GL31.glCopyBufferSubData(GL31.GL_COPY_READ_BUFFER, GL31.GL_COPY_WRITE_BUFFER, readOffset, writeOffset, size);
-        } else {
-            // Manual fallback
-            GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, readBuffer);
-            ByteBuffer src = GL15.glMapBuffer(GL15.GL_ARRAY_BUFFER, GL15.GL_READ_ONLY, size, null);
-            
-            GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, writeBuffer);
-            GL15.glBufferSubData(GL15.GL_ARRAY_BUFFER, writeOffset, src);
-            
-            GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, readBuffer);
-            GL15.glUnmapBuffer(GL15.GL_ARRAY_BUFFER);
-        }
-    }
-    
-    /**
-     * glMapBuffer mapping
-     * GL 1.5: glMapBuffer(target, access)
-     * GL 3.0: glMapBufferRange(target, offset, length, access) [More control]
-     * GL 4.5: glMapNamedBuffer/glMapNamedBufferRange(buffer, ...) [DSA]
-     */
-    public static ByteBuffer mapBuffer(int target, int access, long length) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            // Would need buffer ID
-            return GL30.glMapBufferRange(target, 0, length, translateAccessToMapFlags(access), null);
-        } else if (GLCapabilities.GL30) {
-            return GL30.glMapBufferRange(target, 0, length, translateAccessToMapFlags(access), null);
-        } else if (GLCapabilities.GL15) {
-            return GL15.glMapBuffer(target, access, length, null);
-        }
-        return null;
-    }
-    
-    public static ByteBuffer mapNamedBuffer(int buffer, int access, long length) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            return GL45.glMapNamedBufferRange(buffer, 0, length, translateAccessToMapFlags(access), null);
-        } else {
-            GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, buffer);
-            return mapBuffer(GL15.GL_ARRAY_BUFFER, access, length);
-        }
-    }
-    
-    /**
-     * glUnmapBuffer mapping
-     * GL 1.5: glUnmapBuffer(target)
-     * GL 4.5: glUnmapNamedBuffer(buffer) [DSA]
-     */
-    public static void unmapBuffer(int target) {
-        if (GLCapabilities.GL15) {
-            GL15.glUnmapBuffer(target);
-        }
-    }
-    
-    public static void unmapNamedBuffer(int buffer) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            GL45.glUnmapNamedBuffer(buffer);
-        } else {
-            GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, buffer);
-            GL15.glUnmapBuffer(GL15.GL_ARRAY_BUFFER);
-        }
-    }
-    
-    // ========================================================================
-    // VERTEX ARRAY OPERATIONS
-    // ========================================================================
-    
-    /**
-     * glGenVertexArrays mapping
-     * GL 3.0: glGenVertexArrays()
-     * GL 4.5: glCreateVertexArrays() [DSA - pre-initialized]
-     */
-    public static int genVertexArray() {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            return GL45.glCreateVertexArrays();
-        } else if (GLCapabilities.GL30 && GLCapabilities.hasVAO) {
-            return GL30.glGenVertexArrays();
-        } else {
-            throw new UnsupportedOperationException("VAO not supported");
-        }
-    }
-    
-    /**
-     * glBindVertexArray mapping
-     * GL 3.0: glBindVertexArray(array)
-     */
-    public static void bindVertexArray(int array) {
-        if (GLCapabilities.GL30 && GLCapabilities.hasVAO) {
-            GL30.glBindVertexArray(array);
-        }
-    }
-    
-    /**
-     * glVertexAttribPointer mapping
-     * GL 2.0: glVertexAttribPointer(index, size, type, normalized, stride, pointer)
-     * GL 4.3: glVertexAttribFormat + glVertexAttribBinding [Separate format from binding]
-     * GL 4.5: glVertexArrayAttribFormat + glVertexArrayAttribBinding [DSA]
-     */
-    public static void vertexAttribPointer(int index, int size, int type, boolean normalized, int stride, long pointer) {
-        if (GLCapabilities.GL20) {
-            GL20.glVertexAttribPointer(index, size, type, normalized, stride, pointer);
-        }
-    }
-    
-    /**
-     * glEnableVertexAttribArray mapping
-     * GL 2.0: glEnableVertexAttribArray(index)
-     * GL 4.5: glEnableVertexArrayAttrib(vao, index) [DSA]
-     */
-    public static void enableVertexAttribArray(int index) {
-        if (GLCapabilities.GL20) {
-            GL20.glEnableVertexAttribArray(index);
-        }
-    }
-    
-    public static void disableVertexAttribArray(int index) {
-        if (GLCapabilities.GL20) {
-            GL20.glDisableVertexAttribArray(index);
-        }
-    }
-    
-    // ========================================================================
-    // DRAW CALLS
-    // ========================================================================
-    
-    /**
-     * glDrawArrays mapping
-     * GL 1.1: glDrawArrays(mode, first, count)
-     * GL 4.3: glMultiDrawArraysIndirect(mode, indirect, drawcount, stride) [Batch many draws]
-     */
-    public static void drawArrays(int mode, int first, int count) {
-        GL11.glDrawArrays(mode, first, count);
-    }
-    
-    /**
-     * glDrawElements mapping
-     * GL 1.1: glDrawElements(mode, count, type, indices)
-     * GL 4.3: glMultiDrawElementsIndirect(...) [Batch many draws]
-     */
-    public static void drawElements(int mode, int count, int type, long indices) {
-        GL11.glDrawElements(mode, count, type, indices);
-    }
-    
-    /**
-     * glDrawArraysInstanced mapping
-     * GL 3.1: glDrawArraysInstanced(mode, first, count, instancecount)
-     * GL 4.2: glDrawArraysInstancedBaseInstance(...) [Specify base instance]
-     */
-    public static void drawArraysInstanced(int mode, int first, int count, int instanceCount) {
-        if (GLCapabilities.GL42 && GLCapabilities.hasBaseInstance) {
-            GL42.glDrawArraysInstancedBaseInstance(mode, first, count, instanceCount, 0);
-        } else if (GLCapabilities.GL31 && GLCapabilities.hasInstancing) {
-            GL31.glDrawArraysInstanced(mode, first, count, instanceCount);
-        } else {
-            // Fallback: draw multiple times (slow)
-            for (int i = 0; i < instanceCount; i++) {
-                GL11.glDrawArrays(mode, first, count);
+
+        int genBuffer() {
+            try {
+                return (int) mhGenBuffer.invokeExact();
+            } catch (Throwable t) {
+                throw rethrow(t);
             }
         }
+
+        void deleteBuffer(int buffer) {
+            try {
+                mhDeleteBuffer.invokeExact(buffer);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        void bindBuffer(int target, int buffer) {
+            try {
+                mhBindBuffer.invokeExact(target, buffer);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        void bufferData(int target, long size, int usage) {
+            try {
+                mhBufferDataSize.invokeExact(target, size, usage);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        void bufferData(int target, ByteBuffer data, int usage) {
+            try {
+                mhBufferDataBB.invokeExact(target, data, usage);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        void bufferData(int target, FloatBuffer data, int usage) {
+            try {
+                mhBufferDataFB.invokeExact(target, data, usage);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        void bufferData(int target, IntBuffer data, int usage) {
+            try {
+                mhBufferDataIB.invokeExact(target, data, usage);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        void bufferSubData(int target, long offset, ByteBuffer data) {
+            try {
+                mhBufferSubDataBB.invokeExact(target, offset, data);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        void bufferSubData(int target, long offset, FloatBuffer data) {
+            try {
+                mhBufferSubDataFB.invokeExact(target, offset, data);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        void bufferSubData(int target, long offset, IntBuffer data) {
+            try {
+                mhBufferSubDataIB.invokeExact(target, offset, data);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        ByteBuffer mapBuffer(int target, int access, long lengthIfNeeded) {
+            try {
+                if (mapBufferHasLength) {
+                    return (ByteBuffer) mhMapBuffer.invokeExact(target, access, lengthIfNeeded);
+                }
+                return (ByteBuffer) mhMapBuffer.invokeExact(target, access);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        ByteBuffer mapBufferRange(int target, long offset, long length, int accessFlags) {
+            if (!hasMapBufferRange) return null;
+            try {
+                return (ByteBuffer) mhMapBufferRange.invokeExact(target, offset, length, accessFlags);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        boolean unmapBuffer(int target) {
+            try {
+                if (unmapReturnsBoolean) {
+                    return (boolean) mhUnmapBuffer.invokeExact(target);
+                }
+                mhUnmapBuffer.invokeExact(target);
+                return true;
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        void flushMappedBufferRange(int target, long offset, long length) {
+            if (!hasFlushMappedRange) return;
+            try {
+                mhFlushMappedRange.invokeExact(target, offset, length);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        void copyBufferSubData(int readTarget, int writeTarget, long readOffset, long writeOffset, long size) {
+            if (!hasCopyBufferSubData) return;
+            try {
+                mhCopyBufferSubData.invokeExact(readTarget, writeTarget, readOffset, writeOffset, size);
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        void shutdown() {
+            if (!hasShutdown) return;
+            try {
+                mhShutdown.invokeExact();
+            } catch (Throwable t) {
+                throw rethrow(t);
+            }
+        }
+
+        private static MethodHandle bindRequired(MethodHandles.Lookup lookup, Object impl, String name, MethodType type) {
+            MethodHandle mh = bindOptional(lookup, impl, name, type);
+            return requireNonNull(mh, name + type);
+        }
+
+        private static MethodHandle bindOptional(MethodHandles.Lookup lookup, Object impl, String name, MethodType type) {
+            try {
+                MethodHandle mh = MethodHandles.publicLookup()
+                        .findVirtual(impl.getClass(), name, type)
+                        .bindTo(impl);
+                return mh;
+            } catch (Throwable t) {
+                return null;
+            }
+        }
+
+        private static MethodHandle requireNonNull(MethodHandle mh, String what) {
+            if (mh == null) {
+                throw new IllegalStateException("Pipeline missing required method: " + what);
+            }
+            return mh;
+        }
+
+        private static RuntimeException rethrow(Throwable t) {
+            if (t instanceof RuntimeException) return (RuntimeException) t;
+            if (t instanceof Error) throw (Error) t;
+            return new RuntimeException(t);
+        }
     }
-    
+
+    // ---------------------------------------------------------------------
+    // Instance fields (ALL final for JIT friendliness)
+    // ---------------------------------------------------------------------
+
+    private final Settings settings;
+    private final Thread renderThread;
+    private final boolean debug;
+
+    private final int detectedGL;       // e.g., 46, 45, 33, 121
+    private final int effectiveGL;      // limited by config max
+    private final int bufferOpsVersion; // one of the allowed set
+
+    private final BufferDispatch buffer;
+    private final State state;
+
+    // cached capability flags (read once, used for strict checks)
+    private final boolean hasMultiDrawIndirect;   // GL 4.3+ / extension
+    private final boolean hasPersistentMapping;   // GL 4.4+ / extension
+    private final boolean hasDSA;                 // GL 4.5+ / extension
+
+    private OpenGLManager(Settings s, int detectedGL, int effectiveGL, int opsVer,
+                          BufferDispatch buffer, State state,
+                          boolean hasMDI, boolean hasPM, boolean hasDSA,
+                          Thread renderThread) {
+        this.settings = s;
+        this.renderThread = renderThread;
+        this.debug = s.debug;
+
+        this.detectedGL = detectedGL;
+        this.effectiveGL = effectiveGL;
+        this.bufferOpsVersion = opsVer;
+
+        this.buffer = buffer;
+        this.state = state;
+
+        this.hasMultiDrawIndirect = hasMDI;
+        this.hasPersistentMapping = hasPM;
+        this.hasDSA = hasDSA;
+    }
+
+    // ---------------------------------------------------------------------
+    // init()
+    // ---------------------------------------------------------------------
+
     /**
-     * glDrawElementsInstanced mapping
-     * GL 3.1: glDrawElementsInstanced(mode, count, type, indices, instancecount)
-     * GL 4.2: glDrawElementsInstancedBaseInstance(...) [With base instance]
-     * GL 4.2: glDrawElementsInstancedBaseVertexBaseInstance(...) [With base vertex too]
+     * Initialize (must be called after GL context exists).
+     * Creates exactly one buffer pipeline instance:
+     * GLBufferOps10/11/12/121/15/20/21/30/33/40/43/44/45/46
      */
-    public static void drawElementsInstanced(int mode, int count, int type, long indices, int instanceCount) {
-        if (GLCapabilities.GL42 && GLCapabilities.hasBaseInstance) {
-            GL42.glDrawElementsInstancedBaseInstance(mode, count, type, indices, instanceCount, 0);
-        } else if (GLCapabilities.GL31 && GLCapabilities.hasInstancing) {
-            GL31.glDrawElementsInstanced(mode, count, type, indices, instanceCount);
-        } else {
-            for (int i = 0; i < instanceCount; i++) {
-                GL11.glDrawElements(mode, count, type, indices);
+    public static boolean init() {
+        if (PUBLISHED != null) return true;
+
+        synchronized (OpenGLManager.class) {
+            if (PUBLISHED != null) return true;
+
+            try {
+                OpenGLCallMapper.initialize();
+
+                Config cfg = Config.getInstance();
+                Settings s = new Settings(cfg);
+
+                String ver = OpenGLCallMapper.getString(GL_VERSION);
+                int detected = parseGLVersionCode(ver);
+                int effective = clampToMax(detected, s.maxGL);
+                int opsVer = chooseBufferOpsVersion(effective);
+
+                Object opsImpl = instantiateBufferOps(opsVer);
+
+                // Detect important advanced capabilities from mapper (infra)
+                // If your OpenGLCallMapper doesn’t expose these, keep them conservative.
+                boolean hasMDI = safeHas(OpenGLCallMapper.class, "hasFeatureMultiDrawIndirect");
+                boolean hasPM = safeHas(OpenGLCallMapper.class, "hasFeaturePersistentMapping");
+                boolean hasDSA = safeHas(OpenGLCallMapper.class, "hasFeatureDSA");
+
+                BufferDispatch dispatch = new BufferDispatch(opsImpl, MethodHandles.lookup());
+                State st = new State();
+                st.invalidate();
+
+                Thread rt = Thread.currentThread();
+
+                OpenGLManager mgr = new OpenGLManager(s, detected, effective, opsVer, dispatch, st, hasMDI, hasPM, hasDSA, rt);
+
+                PUBLISHED = mgr;
+                FAST = mgr;
+
+                if (s.debug) {
+                    System.out.println("[OpenGLManager] init ok" +
+                            " LWJGL=" + LWJGL_VERSION +
+                            " GL=" + ver +
+                            " detected=" + detected +
+                            " effective=" + effective +
+                            " bufferOps=" + opsVer);
+                }
+
+                return true;
+            } catch (Throwable t) {
+                System.err.println("[OpenGLManager] init failed: " + t.getMessage());
+                t.printStackTrace();
+                return false;
             }
         }
     }
-    
-    /**
-     * Multi-draw indirect mapping (GL 4.3+)
-     */
-    public static void multiDrawArraysIndirect(int mode, long indirect, int drawcount, int stride) {
-        if (GLCapabilities.GL43 && GLCapabilities.hasMultiDrawIndirect) {
-            GL43.glMultiDrawArraysIndirect(mode, indirect, drawcount, stride);
-        } else {
-            // Fallback: individual draws
-            // Would need to parse indirect buffer manually
+
+    // ---------------------------------------------------------------------
+    // Buffer pipeline selection (ONLY YOUR OPS)
+    // ---------------------------------------------------------------------
+
+    private static Object instantiateBufferOps(int version) {
+        switch (version) {
+            case 10:  return new GLBufferOps10();
+            case 11:  return new GLBufferOps11();
+            case 12:  return new GLBufferOps12();
+            case 121: return new GLBufferOps121();
+            case 15:  return new GLBufferOps15();
+            case 20:  return new GLBufferOps20();
+            case 21:  return new GLBufferOps21();
+            case 30:  return new GLBufferOps30();
+            case 33:  return new GLBufferOps33();
+            case 40:  return new GLBufferOps40();
+            case 43:  return new GLBufferOps43();
+            case 44:  return new GLBufferOps44();
+            case 45:  return new GLBufferOps45();
+            case 46:  return new GLBufferOps46();
+            default:  return new GLBufferOps10();
         }
     }
-    
-    // ========================================================================
-    // FRAMEBUFFER OPERATIONS
-    // ========================================================================
-    
-    /**
-     * glGenFramebuffers mapping
-     * GL 3.0: glGenFramebuffers()
-     * GL 4.5: glCreateFramebuffers() [DSA]
-     */
-    public static int genFramebuffer() {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            return GL45.glCreateFramebuffers();
-        } else if (GLCapabilities.GL30) {
-            return GL30.glGenFramebuffers();
-        } else {
-            throw new UnsupportedOperationException("FBO not supported");
-        }
+
+    private static int chooseBufferOpsVersion(int gl) {
+        // The only allowed pipelines:
+        // 10,11,12,121,15,20,21,30,33,40,43,44,45,46
+        if (gl == 121) return 121;
+        if (gl <= 10) return 10;
+        if (gl == 11) return 11;
+        if (gl == 12) return 12;
+
+        // 1.3/1.4 not listed -> use 1.2.1 pipeline
+        if (gl == 13 || gl == 14) return 121;
+
+        if (gl == 15) return 15;
+
+        if (gl == 20) return 20;
+        if (gl == 21) return 21;
+
+        // 3.0-3.2 -> 30 pipeline
+        if (gl == 30 || gl == 31 || gl == 32) return 30;
+        if (gl == 33) return 33;
+
+        // 4.0-4.2 -> 40 pipeline
+        if (gl == 40 || gl == 41 || gl == 42) return 40;
+        if (gl == 43) return 43;
+        if (gl == 44) return 44;
+        if (gl == 45) return 45;
+        if (gl >= 46) return 46;
+
+        return 10;
     }
-    
-    /**
-     * glBindFramebuffer mapping
-     * GL 3.0: glBindFramebuffer(target, framebuffer)
-     */
-    public static void bindFramebuffer(int target, int framebuffer) {
-        if (GLCapabilities.GL30) {
-            GL30.glBindFramebuffer(target, framebuffer);
+
+    // ---------------------------------------------------------------------
+    // Version parsing including 1.2.1
+    // ---------------------------------------------------------------------
+
+    private static int parseGLVersionCode(String versionString) {
+        if (versionString == null || versionString.isEmpty()) return 11;
+
+        int major = 1, minor = 1, patch = 0;
+
+        int len = versionString.length();
+        int i = 0;
+
+        major = parseIntAt(versionString, i);
+        i = indexOf(versionString, '.', i);
+        if (i >= 0 && i + 1 < len) {
+            i++;
+            minor = parseIntAt(versionString, i);
+            int dot2 = indexOf(versionString, '.', i);
+            if (dot2 >= 0 && dot2 + 1 < len) {
+                patch = parseIntAt(versionString, dot2 + 1);
+            }
         }
+
+        if (major == 1 && minor == 2 && patch == 1) return 121;
+        return major * 10 + minor;
     }
-    
-    /**
-     * glFramebufferTexture2D mapping
-     * GL 3.0: glFramebufferTexture2D(target, attachment, textarget, texture, level)
-     * GL 4.5: glNamedFramebufferTexture(framebuffer, attachment, texture, level) [DSA]
-     */
-    public static void framebufferTexture2D(int target, int attachment, int textarget, int texture, int level) {
-        if (GLCapabilities.GL45 && GLCapabilities.hasDSA) {
-            // Would need framebuffer ID
-            GL30.glFramebufferTexture2D(target, attachment, textarget, texture, level);
-        } else if (GLCapabilities.GL30) {
-            GL30.glFramebufferTexture2D(target, attachment, textarget, texture, level);
+
+    private static int parseIntAt(String s, int start) {
+        int len = s.length();
+        int i = start;
+        int val = 0;
+        boolean any = false;
+        while (i < len) {
+            char c = s.charAt(i);
+            if (c < '0' || c > '9') break;
+            any = true;
+            val = val * 10 + (c - '0');
+            i++;
         }
+        return any ? val : 0;
     }
-    
-    // ========================================================================
-    // SHADER OPERATIONS
-    // ========================================================================
-    
-    /**
-     * glCreateShader mapping
-     * GL 2.0: glCreateShader(type)
-     */
-    public static int createShader(int type) {
-        if (GLCapabilities.GL20) {
-            return GL20.glCreateShader(type);
-        }
-        throw new UnsupportedOperationException("Shaders not supported");
-    }
-    
-    /**
-     * glShaderSource mapping
-     * GL 2.0: glShaderSource(shader, string)
-     */
-    public static void shaderSource(int shader, CharSequence source) {
-        if (GLCapabilities.GL20) {
-            GL20.glShaderSource(shader, source);
-        }
-    }
-    
-    /**
-     * glCompileShader mapping
-     * GL 2.0: glCompileShader(shader)
-     */
-    public static void compileShader(int shader) {
-        if (GLCapabilities.GL20) {
-            GL20.glCompileShader(shader);
-        }
-    }
-    
-    /**
-     * glCreateProgram mapping
-     * GL 2.0: glCreateProgram()
-     */
-    public static int createProgram() {
-        if (GLCapabilities.GL20) {
-            return GL20.glCreateProgram();
-        }
-        throw new UnsupportedOperationException("Shaders not supported");
-    }
-    
-    /**
-     * glAttachShader mapping
-     * GL 2.0: glAttachShader(program, shader)
-     */
-    public static void attachShader(int program, int shader) {
-        if (GLCapabilities.GL20) {
-            GL20.glAttachShader(program, shader);
-        }
-    }
-    
-    /**
-     * glLinkProgram mapping
-     * GL 2.0: glLinkProgram(program)
-     */
-    public static void linkProgram(int program) {
-        if (GLCapabilities.GL20) {
-            GL20.glLinkProgram(program);
-        }
-    }
-    
-    /**
-     * glUseProgram mapping
-     * GL 2.0: glUseProgram(program)
-     */
-    public static void useProgram(int program) {
-        if (GLCapabilities.GL20) {
-            GL20.glUseProgram(program);
-        }
-    }
-    
-    /**
-     * glGetUniformLocation mapping
-     * GL 2.0: glGetUniformLocation(program, name)
-     */
-    public static int getUniformLocation(int program, CharSequence name) {
-        if (GLCapabilities.GL20) {
-            return GL20.glGetUniformLocation(program, name);
+
+    private static int indexOf(String s, char ch, int start) {
+        int len = s.length();
+        for (int i = start; i < len; i++) {
+            if (s.charAt(i) == ch) return i;
+            // stop if we reach whitespace before finding dots
+            if (s.charAt(i) <= ' ') break;
         }
         return -1;
     }
-    
-    /**
-     * glUniform* mapping
-     * GL 2.0: glUniform1f, glUniform2f, etc.
-     * GL 4.1: glProgramUniform* [Can set uniforms without binding program]
-     */
-    public static void uniform1f(int location, float v0) {
-        if (GLCapabilities.GL20) {
-            GL20.glUniform1f(location, v0);
+
+    private static int clampToMax(int detected, int max) {
+        // Interpret 1.2.1 as 1.2 for comparison against user max,
+        // but preserve 121 if it is the detected version and allowed.
+        int d = (detected == 121) ? 12 : detected;
+        int m = (max == 121) ? 12 : max;
+
+        return (d <= m) ? detected : max;
+    }
+
+    // ---------------------------------------------------------------------
+    // Capability detection from OpenGLCallMapper (best-effort).
+    // If your mapper has different names, this safely returns false.
+    // ---------------------------------------------------------------------
+
+    private static boolean safeHas(Class<?> mapper, String method) {
+        try {
+            Object v = mapper.getMethod(method).invoke(null);
+            return (v instanceof Boolean) && (Boolean) v;
+        } catch (Throwable t) {
+            return false;
         }
     }
-    
-    public static void uniform2f(int location, float v0, float v1) {
-        if (GLCapabilities.GL20) {
-            GL20.glUniform2f(location, v0, v1);
+
+    // ---------------------------------------------------------------------
+    // Debug-only render-thread check (zero overhead when debug=false)
+    // ---------------------------------------------------------------------
+
+    private void assertRenderThread() {
+        if (!debug) return;
+        if (Thread.currentThread() != renderThread) {
+            throw new IllegalStateException("OpenGLManager used from wrong thread. Expected=" +
+                    renderThread.getName() + " got=" + Thread.currentThread().getName());
         }
     }
-    
-    public static void uniform3f(int location, float v0, float v1, float v2) {
-        if (GLCapabilities.GL20) {
-            GL20.glUniform3f(location, v0, v1, v2);
+
+    // ---------------------------------------------------------------------
+    // Public: state desync handling
+    // ---------------------------------------------------------------------
+
+    /**
+     * If any code calls GL directly bypassing this manager, call invalidateState()
+     * before you start your rendering pass.
+     */
+    public void invalidateState() {
+        assertRenderThread();
+        state.invalidate();
+    }
+
+    // ---------------------------------------------------------------------
+    // Public: Buffer routing (fastest hot path)
+    // ---------------------------------------------------------------------
+
+    public int genBuffer() {
+        assertRenderThread();
+        return buffer.genBuffer();
+    }
+
+    public void deleteBuffer(int id) {
+        assertRenderThread();
+        buffer.deleteBuffer(id);
+        // keep cache correct
+        if (state.arrayBuffer == id) state.arrayBuffer = -1;
+        if (state.elementBuffer == id) state.elementBuffer = -1;
+    }
+
+    /**
+     * Bind caching here is *very* worth it.
+     * It prevents massive JNI/driver churn.
+     */
+    public void bindBuffer(int target, int id) {
+        assertRenderThread();
+
+        if (settings.cacheBinds) {
+            if (target == GL_ARRAY_BUFFER) {
+                if (state.arrayBuffer == id) return;
+                state.arrayBuffer = id;
+            } else if (target == GL_ELEMENT_ARRAY_BUFFER) {
+                if (state.elementBuffer == id) return;
+                state.elementBuffer = id;
+            }
+        }
+
+        buffer.bindBuffer(target, id);
+    }
+
+    public void bufferData(int target, long size, int usage) {
+        assertRenderThread();
+        buffer.bufferData(target, size, usage);
+    }
+
+    public void bufferData(int target, ByteBuffer data, int usage) {
+        assertRenderThread();
+        buffer.bufferData(target, data, usage);
+    }
+
+    public void bufferData(int target, FloatBuffer data, int usage) {
+        assertRenderThread();
+        buffer.bufferData(target, data, usage);
+    }
+
+    public void bufferData(int target, IntBuffer data, int usage) {
+        assertRenderThread();
+        buffer.bufferData(target, data, usage);
+    }
+
+    public void bufferSubData(int target, long offset, ByteBuffer data) {
+        assertRenderThread();
+        buffer.bufferSubData(target, offset, data);
+    }
+
+    public void bufferSubData(int target, long offset, FloatBuffer data) {
+        assertRenderThread();
+        buffer.bufferSubData(target, offset, data);
+    }
+
+    public void bufferSubData(int target, long offset, IntBuffer data) {
+        assertRenderThread();
+        buffer.bufferSubData(target, offset, data);
+    }
+
+    /**
+     * mapBuffer:
+     * Some pipelines expose mapBuffer(target, access) and some mapBuffer(target, access, length).
+     * Manager exposes the superset; if pipeline needs length we pass it.
+     */
+    public ByteBuffer mapBuffer(int target, int access, long lengthIfNeeded) {
+        assertRenderThread();
+        return buffer.mapBuffer(target, access, lengthIfNeeded);
+    }
+
+    /**
+     * mapBufferRange:
+     * Returns null if pipeline does not support it.
+     * If strict, throws.
+     */
+    public ByteBuffer mapBufferRange(int target, long offset, long length, int accessFlags) {
+        assertRenderThread();
+        ByteBuffer bb = buffer.mapBufferRange(target, offset, length, accessFlags);
+        if (bb == null && settings.strictNoEmulation) {
+            throw new UnsupportedOperationException("mapBufferRange not supported by pipeline GLBufferOps" + bufferOpsVersion);
+        }
+        return bb;
+    }
+
+    public boolean unmapBuffer(int target) {
+        assertRenderThread();
+        return buffer.unmapBuffer(target);
+    }
+
+    /**
+     * Flush mapped range:
+     * No-op if pipeline doesn’t expose it.
+     * If strict and requested, throw.
+     */
+    public void flushMappedBufferRange(int target, long offset, long length) {
+        assertRenderThread();
+        if (!buffer.hasFlushMappedRange && settings.strictNoEmulation) {
+            throw new UnsupportedOperationException("flushMappedBufferRange not supported by pipeline GLBufferOps" + bufferOpsVersion);
+        }
+        buffer.flushMappedBufferRange(target, offset, length);
+    }
+
+    /**
+     * Copy buffer sub data:
+     * No-op if pipeline doesn’t expose it.
+     * If strict, throw.
+     */
+    public void copyBufferSubData(int readTarget, int writeTarget, long readOffset, long writeOffset, long size) {
+        assertRenderThread();
+        if (!buffer.hasCopyBufferSubData && settings.strictNoEmulation) {
+            throw new UnsupportedOperationException("copyBufferSubData not supported by pipeline GLBufferOps" + bufferOpsVersion);
+        }
+        buffer.copyBufferSubData(readTarget, writeTarget, readOffset, writeOffset, size);
+    }
+
+    // ---------------------------------------------------------------------
+    // Public: extreme-perf features that the manager can route (no emulation)
+    // (These are optional entrypoints; pipelines + mapper do the heavy lifting.)
+    // ---------------------------------------------------------------------
+
+    /**
+     * MultiDrawArraysIndirect (GL 4.3+):
+     * Manager will NOT emulate by looping unless you explicitly disable strictNoEmulation.
+     */
+    public void multiDrawArraysIndirect(int mode, long indirect, int drawCount, int stride) {
+        assertRenderThread();
+        if (!settings.enableMultiDrawIndirect || !hasMultiDrawIndirect) {
+            if (settings.strictNoEmulation) {
+                throw new UnsupportedOperationException("MultiDrawArraysIndirect not supported/enabled");
+            }
+            return;
+        }
+        OpenGLCallMapper.multiDrawArraysIndirect(mode, indirect, drawCount, stride);
+    }
+
+    /**
+     * MultiDrawElementsIndirect (GL 4.3+):
+     * No emulation here.
+     */
+    public void multiDrawElementsIndirect(int mode, int type, long indirect, int drawCount, int stride) {
+        assertRenderThread();
+        if (!settings.enableMultiDrawIndirect || !hasMultiDrawIndirect) {
+            if (settings.strictNoEmulation) {
+                throw new UnsupportedOperationException("MultiDrawElementsIndirect not supported/enabled");
+            }
+            return;
+        }
+        OpenGLCallMapper.multiDrawElementsIndirect(mode, type, indirect, drawCount, stride);
+    }
+
+    // ---------------------------------------------------------------------
+    // Public: common state caching (tiny, fast, big win)
+    // ---------------------------------------------------------------------
+
+    public void enable(int cap) {
+        assertRenderThread();
+        if (!settings.cacheCommonState) {
+            OpenGLCallMapper.enable(cap);
+            return;
+        }
+        int bit = capToBit(cap);
+        if (bit >= 0) {
+            long mask = 1L << bit;
+            if ((state.enableBits & mask) != 0L) return;
+            state.enableBits |= mask;
+        }
+        OpenGLCallMapper.enable(cap);
+    }
+
+    public void disable(int cap) {
+        assertRenderThread();
+        if (!settings.cacheCommonState) {
+            OpenGLCallMapper.disable(cap);
+            return;
+        }
+        int bit = capToBit(cap);
+        if (bit >= 0) {
+            long mask = 1L << bit;
+            if ((state.enableBits & mask) == 0L) return;
+            state.enableBits &= ~mask;
+        }
+        OpenGLCallMapper.disable(cap);
+    }
+
+    private static int capToBit(int cap) {
+        switch (cap) {
+            case GL_DEPTH_TEST:   return State.BIT_DEPTH;
+            case GL_BLEND:        return State.BIT_BLEND;
+            case GL_CULL_FACE:    return State.BIT_CULL;
+            case GL_SCISSOR_TEST: return State.BIT_SCISS;
+            case GL_STENCIL_TEST: return State.BIT_STEN;
+            default:              return -1;
         }
     }
-    
-    public static void uniform4f(int location, float v0, float v1, float v2, float v3) {
-        if (GLCapabilities.GL20) {
-            GL20.glUniform4f(location, v0, v1, v2, v3);
+
+    public void depthFunc(int func) {
+        assertRenderThread();
+        if (settings.cacheCommonState && state.depthFunc == func) return;
+        state.depthFunc = func;
+        OpenGLCallMapper.depthFunc(func);
+    }
+
+    public void depthMask(boolean flag) {
+        assertRenderThread();
+        if (settings.cacheCommonState && state.depthMask == flag) return;
+        state.depthMask = flag;
+        OpenGLCallMapper.depthMask(flag);
+    }
+
+    public void blendFunc(int sfactor, int dfactor) {
+        assertRenderThread();
+        if (settings.cacheCommonState &&
+                state.blendSrcRGB == sfactor && state.blendDstRGB == dfactor &&
+                state.blendSrcA == sfactor && state.blendDstA == dfactor) {
+            return;
         }
+        state.blendSrcRGB = sfactor;
+        state.blendDstRGB = dfactor;
+        state.blendSrcA = sfactor;
+        state.blendDstA = dfactor;
+        OpenGLCallMapper.blendFunc(sfactor, dfactor);
     }
-    
-    public static void uniformMatrix4fv(int location, boolean transpose, FloatBuffer value) {
-        if (GLCapabilities.GL20) {
-            GL20.glUniformMatrix4fv(location, transpose, value);
+
+    public void blendFuncSeparate(int srcRGB, int dstRGB, int srcA, int dstA) {
+        assertRenderThread();
+        if (settings.cacheCommonState &&
+                state.blendSrcRGB == srcRGB && state.blendDstRGB == dstRGB &&
+                state.blendSrcA == srcA && state.blendDstA == dstA) {
+            return;
         }
+        state.blendSrcRGB = srcRGB;
+        state.blendDstRGB = dstRGB;
+        state.blendSrcA = srcA;
+        state.blendDstA = dstA;
+        OpenGLCallMapper.blendFuncSeparate(srcRGB, dstRGB, srcA, dstA);
     }
-    
-    // ========================================================================
-    // STATE MANAGEMENT
-    // ========================================================================
-    
-    /**
-     * glEnable/glDisable mapping
-     * GL 1.1: glEnable(cap) / glDisable(cap)
-     */
-    public static void enable(int cap) {
-        GL11.glEnable(cap);
-    }
-    
-    public static void disable(int cap) {
-        GL11.glDisable(cap);
-    }
-    
-    /**
-     * glBlendFunc mapping
-     * GL 1.1: glBlendFunc(sfactor, dfactor)
-     * GL 1.4: glBlendFuncSeparate(srcRGB, dstRGB, srcAlpha, dstAlpha)
-     * GL 4.0: glBlendFunci(...) [Per-draw-buffer blending]
-     */
-    public static void blendFunc(int sfactor, int dfactor) {
-        GL11.glBlendFunc(sfactor, dfactor);
-    }
-    
-    public static void blendFuncSeparate(int srcRGB, int dstRGB, int srcAlpha, int dstAlpha) {
-        if (GLCapabilities.GL14) {
-            GL14.glBlendFuncSeparate(srcRGB, dstRGB, srcAlpha, dstAlpha);
-        } else {
-            GL11.glBlendFunc(srcRGB, dstRGB);
+
+    // ---------------------------------------------------------------------
+    // Lightweight diagnostics / getters
+    // ---------------------------------------------------------------------
+
+    public int getDetectedGLVersion() { return detectedGL; }
+    public int getEffectiveGLVersion() { return effectiveGL; }
+    public int getBufferOpsVersion() { return bufferOpsVersion; }
+
+    public boolean isDSAAvailable() { return hasDSA; }
+    public boolean isPersistentMappingAvailable() { return hasPersistentMapping; }
+    public boolean isMultiDrawIndirectAvailable() { return hasMultiDrawIndirect; }
+
+    // ---------------------------------------------------------------------
+    // Shutdown: no leaks (pipelines + mapper caches)
+    // ---------------------------------------------------------------------
+
+    public void shutdown() {
+        assertRenderThread();
+
+        // Ask pipeline to cleanup if it owns any internal resources (should be lightweight).
+        try {
+            buffer.shutdown();
+        } catch (Throwable ignored) {}
+
+        // Clear mapper caches (shader/program caches, etc.) if present.
+        try {
+            OpenGLCallMapper.clearAllCaches();
+        } catch (Throwable ignored) {}
+
+        state.invalidate();
+
+        synchronized (OpenGLManager.class) {
+            PUBLISHED = null;
+            FAST = null;
         }
-    }
-    
-    /**
-     * glDepthFunc mapping
-     * GL 1.1: glDepthFunc(func)
-     */
-    public static void depthFunc(int func) {
-        GL11.glDepthFunc(func);
-    }
-    
-    /**
-     * glDepthMask mapping
-     * GL 1.1: glDepthMask(flag)
-     */
-    public static void depthMask(boolean flag) {
-        GL11.glDepthMask(flag);
-    }
-    
-    /**
-     * glCullFace mapping
-     * GL 1.1: glCullFace(mode)
-     */
-    public static void cullFace(int mode) {
-        GL11.glCullFace(mode);
-    }
-    
-    /**
-     * glPolygonMode mapping
-     * GL 1.1: glPolygonMode(face, mode)
-     */
-    public static void polygonMode(int face, int mode) {
-        GL11.glPolygonMode(face, mode);
-    }
-    
-    // ========================================================================
-    // QUERY OPERATIONS
-    // ========================================================================
-    
-    /**
-     * glGetInteger mapping
-     * GL 1.1: glGetIntegerv(pname, params)
-     * GL 4.5: glGetInteger*(pname) [Type-specific getters]
-     */
-    public static int getInteger(int pname) {
-        return GL11.glGetInteger(pname);
-    }
-    
-    public static void getIntegerv(int pname, IntBuffer params) {
-        GL11.glGetIntegerv(pname, params);
-    }
-    
-    /**
-     * glGetString mapping
-     * GL 1.1: glGetString(name)
-     */
-    public static String getString(int name) {
-        return GL11.glGetString(name);
-    }
-    
-    /**
-     * glGetError mapping
-     * GL 1.1: glGetError()
-     */
-    public static int getError() {public static int getError() {
-        return GL11.glGetError();
-    }
-    
-    // ========================================================================
-    // UTILITY FUNCTIONS
-    // ========================================================================
-    
-    private static int translateUsageToStorageFlags(int usage) {
-        return switch (usage) {
-            case GL15.GL_STATIC_DRAW -> 0;
-            case GL15.GL_DYNAMIC_DRAW -> GL44.GL_DYNAMIC_STORAGE_BIT;
-            case GL15.GL_STREAM_DRAW -> GL44.GL_DYNAMIC_STORAGE_BIT | GL44.GL_MAP_WRITE_BIT;
-            case GL15.GL_STATIC_READ -> GL44.GL_MAP_READ_BIT;
-            case GL15.GL_DYNAMIC_READ -> GL44.GL_DYNAMIC_STORAGE_BIT | GL44.GL_MAP_READ_BIT;
-            case GL15.GL_STREAM_READ -> GL44.GL_DYNAMIC_STORAGE_BIT | GL44.GL_MAP_READ_BIT;
-            case GL15.GL_STATIC_COPY -> 0;
-            case GL15.GL_DYNAMIC_COPY -> GL44.GL_DYNAMIC_STORAGE_BIT;
-            case GL15.GL_STREAM_COPY -> GL44.GL_DYNAMIC_STORAGE_BIT;
-            default -> GL44.GL_DYNAMIC_STORAGE_BIT;
-        };
-    }
-    
-    private static int translateAccessToMapFlags(int access) {
-        return switch (access) {
-            case GL15.GL_READ_ONLY -> GL30.GL_MAP_READ_BIT;
-            case GL15.GL_WRITE_ONLY -> GL30.GL_MAP_WRITE_BIT;
-            case GL15.GL_READ_WRITE -> GL30.GL_MAP_READ_BIT | GL30.GL_MAP_WRITE_BIT;
-            default -> GL30.GL_MAP_WRITE_BIT;
-        };
     }
 }
