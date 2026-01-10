@@ -5,33 +5,47 @@ import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 
 /**
- * OpenGL 1.2 Pipeline - NO VBO SUPPORT
+ * GLBufferOps12 - OpenGL 1.2 Pipeline
  * 
- * Display Color: Light Gray (#777777)
+ * OpenGL 1.2 (1998): 3D textures, BGRA format, packed pixels.
+ * Still NO Vertex Buffer Objects.
+ * 
+ * ┌─────────────────────────────────────────┐
+ * │ Snowium Render: OpenGL 1.2 (No VBO)     │
+ * │ Color: #777777 (Light Gray)             │
+ * └─────────────────────────────────────────┘
  */
-public final class GLBufferOps12 {
-    public static final int VERSION = 12;
-    public static final int COLOR = 0x777777;
-    public static final String NAME = "Snowy OpenGL 1.2";
-    
-    private static final UnsupportedOperationException NO_VBO = 
-        new UnsupportedOperationException("GL 1.2: No VBO support. Requires GL 1.5+");
+public final class GLBufferOps12 implements BufferOps {
 
-    public int genBuffer() { throw NO_VBO; }
-    public int[] genBuffers(int n) { throw NO_VBO; }
-    public void deleteBuffer(int b) { throw NO_VBO; }
-    public void deleteBuffers(int[] b) { throw NO_VBO; }
-    public void bindBuffer(int t, int b) { throw NO_VBO; }
-    public void bufferData(int t, long s, int u) { throw NO_VBO; }
-    public void bufferData(int t, ByteBuffer d, int u) { throw NO_VBO; }
-    public void bufferData(int t, FloatBuffer d, int u) { throw NO_VBO; }
-    public void bufferData(int t, IntBuffer d, int u) { throw NO_VBO; }
-    public void bufferSubData(int t, long o, ByteBuffer d) { throw NO_VBO; }
-    public void bufferSubData(int t, long o, FloatBuffer d) { throw NO_VBO; }
-    public void bufferSubData(int t, long o, IntBuffer d) { throw NO_VBO; }
-    public ByteBuffer mapBuffer(int t, int a) { throw NO_VBO; }
-    public ByteBuffer mapBuffer(int t, int a, long l) { throw NO_VBO; }
-    public boolean unmapBuffer(int t) { throw NO_VBO; }
-    public int getBufferParameteri(int t, int p) { throw NO_VBO; }
-    public void shutdown() {}
+    public static final int VERSION_CODE = 12;
+    public static final int DISPLAY_COLOR = GLBufferOpsBase.COLOR_GL12;
+    public static final String VERSION_NAME = "OpenGL 1.2";
+    
+    private static final String ERR = "[" + GLBufferOpsBase.RENDER_NAME + "] GL 1.2 has no VBO. Need 1.5+";
+    
+    public GLBufferOps12() {
+        System.err.println("[" + GLBufferOpsBase.DEBUG_HEADER + "] WARNING: GL 1.2 - No VBO");
+    }
+    
+    @Override public int getVersionCode() { return VERSION_CODE; }
+    @Override public int getDisplayColor() { return DISPLAY_COLOR; }
+    @Override public String getVersionName() { return VERSION_NAME; }
+    @Override public boolean supportsVBO() { return false; }
+    
+    @Override public int genBuffer() { throw new UnsupportedOperationException(ERR); }
+    @Override public int[] genBuffers(int c) { throw new UnsupportedOperationException(ERR); }
+    @Override public void deleteBuffer(int b) { throw new UnsupportedOperationException(ERR); }
+    @Override public void deleteBuffers(int[] b) { throw new UnsupportedOperationException(ERR); }
+    @Override public void bindBuffer(int t, int b) { throw new UnsupportedOperationException(ERR); }
+    @Override public void bufferData(int t, long s, int u) { throw new UnsupportedOperationException(ERR); }
+    @Override public void bufferData(int t, ByteBuffer d, int u) { throw new UnsupportedOperationException(ERR); }
+    @Override public void bufferData(int t, FloatBuffer d, int u) { throw new UnsupportedOperationException(ERR); }
+    @Override public void bufferData(int t, IntBuffer d, int u) { throw new UnsupportedOperationException(ERR); }
+    @Override public void bufferSubData(int t, long o, ByteBuffer d) { throw new UnsupportedOperationException(ERR); }
+    @Override public void bufferSubData(int t, long o, FloatBuffer d) { throw new UnsupportedOperationException(ERR); }
+    @Override public void bufferSubData(int t, long o, IntBuffer d) { throw new UnsupportedOperationException(ERR); }
+    @Override public ByteBuffer mapBuffer(int t, int a) { throw new UnsupportedOperationException(ERR); }
+    @Override public ByteBuffer mapBuffer(int t, int a, long l) { throw new UnsupportedOperationException(ERR); }
+    @Override public boolean unmapBuffer(int t) { throw new UnsupportedOperationException(ERR); }
+    @Override public void shutdown() {}
 }
