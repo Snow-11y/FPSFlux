@@ -5,81 +5,33 @@ import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
 
 /**
- * GLBufferOps11 - OpenGL 1.1 Pipeline
+ * OpenGL 1.1 Pipeline - NO VBO SUPPORT
  * 
- * OpenGL 1.1 added texture objects but still no VBOs.
- * All buffer operations throw UnsupportedOperationException.
- * 
- * F3 Display Color: Gray (#666666) - Legacy/Unsupported
+ * Display Color: Gray (#666666)
  */
 public final class GLBufferOps11 {
+    public static final int VERSION = 11;
+    public static final int COLOR = 0x666666;
+    public static final String NAME = "GL 1.1";
+    
+    private static final UnsupportedOperationException NO_VBO = 
+        new UnsupportedOperationException("GL 1.1: No VBO support. Requires GL 1.5+");
 
-    public static final int VERSION_CODE = 11;
-    public static final int DISPLAY_COLOR = 0x666666;
-    public static final String VERSION_NAME = "OpenGL 1.1 (No VBO)";
-
-    private static final String ERR_MSG = "OpenGL 1.1 does not support Vertex Buffer Objects. " +
-            "Minimum GL 1.5 required for VBO operations.";
-
-    public GLBufferOps11() {
-        System.err.println("[GLBufferOps11] WARNING: GL 1.1 pipeline selected. VBOs not available!");
-    }
-
-    public int genBuffer() {
-        throw new UnsupportedOperationException(ERR_MSG);
-    }
-
-    public int[] genBuffers(int count) {
-        throw new UnsupportedOperationException(ERR_MSG);
-    }
-
-    public void deleteBuffer(int buffer) {
-        throw new UnsupportedOperationException(ERR_MSG);
-    }
-
-    public void deleteBuffers(int[] buffers) {
-        throw new UnsupportedOperationException(ERR_MSG);
-    }
-
-    public void bindBuffer(int target, int buffer) {
-        throw new UnsupportedOperationException(ERR_MSG);
-    }
-
-    public void bufferData(int target, long size, int usage) {
-        throw new UnsupportedOperationException(ERR_MSG);
-    }
-
-    public void bufferData(int target, ByteBuffer data, int usage) {
-        throw new UnsupportedOperationException(ERR_MSG);
-    }
-
-    public void bufferData(int target, FloatBuffer data, int usage) {
-        throw new UnsupportedOperationException(ERR_MSG);
-    }
-
-    public void bufferData(int target, IntBuffer data, int usage) {
-        throw new UnsupportedOperationException(ERR_MSG);
-    }
-
-    public void bufferSubData(int target, long offset, ByteBuffer data) {
-        throw new UnsupportedOperationException(ERR_MSG);
-    }
-
-    public void bufferSubData(int target, long offset, FloatBuffer data) {
-        throw new UnsupportedOperationException(ERR_MSG);
-    }
-
-    public void bufferSubData(int target, long offset, IntBuffer data) {
-        throw new UnsupportedOperationException(ERR_MSG);
-    }
-
-    public ByteBuffer mapBuffer(int target, int access) {
-        throw new UnsupportedOperationException(ERR_MSG);
-    }
-
-    public boolean unmapBuffer(int target) {
-        throw new UnsupportedOperationException(ERR_MSG);
-    }
-
+    public int genBuffer() { throw NO_VBO; }
+    public int[] genBuffers(int n) { throw NO_VBO; }
+    public void deleteBuffer(int b) { throw NO_VBO; }
+    public void deleteBuffers(int[] b) { throw NO_VBO; }
+    public void bindBuffer(int t, int b) { throw NO_VBO; }
+    public void bufferData(int t, long s, int u) { throw NO_VBO; }
+    public void bufferData(int t, ByteBuffer d, int u) { throw NO_VBO; }
+    public void bufferData(int t, FloatBuffer d, int u) { throw NO_VBO; }
+    public void bufferData(int t, IntBuffer d, int u) { throw NO_VBO; }
+    public void bufferSubData(int t, long o, ByteBuffer d) { throw NO_VBO; }
+    public void bufferSubData(int t, long o, FloatBuffer d) { throw NO_VBO; }
+    public void bufferSubData(int t, long o, IntBuffer d) { throw NO_VBO; }
+    public ByteBuffer mapBuffer(int t, int a) { throw NO_VBO; }
+    public ByteBuffer mapBuffer(int t, int a, long l) { throw NO_VBO; }
+    public boolean unmapBuffer(int t) { throw NO_VBO; }
+    public int getBufferParameteri(int t, int p) { throw NO_VBO; }
     public void shutdown() {}
 }
