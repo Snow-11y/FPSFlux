@@ -12,7 +12,7 @@ import java.nio.IntBuffer;
 public final class GLBufferOps12 {
     public static final int VERSION = 12;
     public static final int COLOR = 0x777777;
-    public static final String NAME = "OpenGL 1.2";
+    public static final String NAME = "Snowy OpenGL 1.2";
     
     private static final UnsupportedOperationException NO_VBO = 
         new UnsupportedOperationException("GL 1.2: No VBO support. Requires GL 1.5+");
