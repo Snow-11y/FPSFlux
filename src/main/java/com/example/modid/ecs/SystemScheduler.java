@@ -1,27 +1,31 @@
 package com.example.modid.ecs;
 
 import com.example.modid.FPSFlux;
+import jdk.jfr.Event;
+import jdk.jfr.Label;
+import jdk.jfr.Category;
 
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.stream.Collectors;
 
 /**
- * SystemScheduler - Manages system execution with parallel processing support.
+ * SystemScheduler - High-performance system execution with virtual threads and structured concurrency.
  * 
- * <p>Features:</p>
+ * <p>Modern features:</p>
  * <ul>
- *   <li>Priority-based ordering</li>
- *   <li>Parallel execution of independent systems</li>
- *   <li>Dependency tracking</li>
- *   <li>Performance profiling</li>
+ *   <li>Virtual thread execution for massive parallelism</li>
+ *   <li>Structured concurrency with proper cancellation</li>
+ *   <li>Lock-free dependency tracking</li>
+ *   <li>JFR profiling integration</li>
+ *   <li>Work-stealing load balancing</li>
+ *   <li>Tarjan cycle detection</li>
  * </ul>
  */
 public final class SystemScheduler {
     
-    /**
-     * Execution stage.
-     */
     public enum Stage {
         PRE_UPDATE,
         UPDATE,
@@ -31,66 +35,117 @@ public final class SystemScheduler {
     }
     
     /**
-     * System registration with metadata.
+     * JFR event for system execution profiling.
+     */
+    @Category("ECS")
+    @Label("System Execution")
+    private static final class SystemExecutionEvent extends Event {
+        @Label("System Name") String systemName;
+        @Label("Stage") String stage;
+        @Label("Duration Nanos") long durationNanos;
+        @Label("Entity Count") int entityCount;
+    }
+    
+    /**
+     * System registration with concurrent-safe metadata.
      */
     private static final class SystemEntry {
         final System system;
         final Stage stage;
-        final Set<String> dependencies;
-        final Set<String> dependents;
+        final Set<String> dependencies = ConcurrentHashMap.newKeySet();
+        final Set<String> dependents = ConcurrentHashMap.newKeySet();
+        final LongAdder executionTime = new LongAdder();
         volatile boolean completed;
+        volatile boolean executing;
         
         SystemEntry(System system, Stage stage) {
             this.system = system;
             this.stage = stage;
-            this.dependencies = new HashSet<>();
-            this.dependents = new HashSet<>();
-            this.completed = false;
         }
     }
     
-    private final Map<String, SystemEntry> systems = new LinkedHashMap<>();
+    /**
+     * Dependency graph node for Tarjan's algorithm.
+     */
+    private static final class GraphNode {
+        final SystemEntry entry;
+        int index = -1;
+        int lowLink = -1;
+        boolean onStack = false;
+        
+        GraphNode(SystemEntry entry) {
+            this.entry = entry;
+        }
+    }
+    
+    private final ConcurrentHashMap<String, SystemEntry> systems = new ConcurrentHashMap<>();
     private final Map<Stage, List<SystemEntry>> stageOrder = new EnumMap<>(Stage.class);
     private final ExecutorService executor;
+    private final ForkJoinPool workStealingPool;
     private final int parallelism;
+    private final boolean useVirtualThreads;
     
     private volatile boolean orderDirty = true;
+    private volatile boolean profilingEnabled = false;
     
     /**
-     * Create scheduler with specified parallelism.
+     * Create scheduler with virtual threads (Java 21+) or fallback to platform threads.
      */
-    public SystemScheduler(int parallelism) {
+    public SystemScheduler(int parallelism, boolean preferVirtualThreads) {
         this.parallelism = parallelism;
-        this.executor = Executors.newFixedThreadPool(parallelism, r -> {
-            Thread t = new Thread(r, "ECS-Worker-" + System.nanoTime());
-            t.setDaemon(true);
-            return t;
-        });
+        this.useVirtualThreads = preferVirtualThreads && isVirtualThreadsSupported();
+        
+        if (useVirtualThreads) {
+            this.executor = Executors.newVirtualThreadPerTaskExecutor();
+            FPSFlux.LOGGER.info("[ECS] Using virtual threads for system execution");
+        } else {
+            this.executor = Executors.newFixedThreadPool(parallelism, r -> {
+                Thread t = new Thread(r, "ECS-Worker-" + System.nanoTime());
+                t.setDaemon(true);
+                t.setPriority(Thread.NORM_PRIORITY + 1);
+                return t;
+            });
+        }
+        
+        // Work-stealing pool for fine-grained parallelism
+        this.workStealingPool = new ForkJoinPool(
+            parallelism,
+            ForkJoinPool.defaultForkJoinWorkerThreadFactory,
+            null,
+            true // asyncMode for better throughput
+        );
         
         for (Stage stage : Stage.values()) {
-            stageOrder.put(stage, new ArrayList<>());
+            stageOrder.put(stage, new CopyOnWriteArrayList<>());
         }
     }
     
-    /**
-     * Create scheduler with default parallelism (CPU cores - 1).
-     */
+    public SystemScheduler(int parallelism) {
+        this(parallelism, true);
+    }
+    
     public SystemScheduler() {
-        this(Math.max(1, Runtime.getRuntime().availableProcessors() - 1));
+        this(Math.max(2, Runtime.getRuntime().availableProcessors() - 1), true);
     }
     
     /**
-     * Register a system.
+     * Check if virtual threads are available (Java 21+).
      */
+    private static boolean isVirtualThreadsSupported() {
+        try {
+            Class.forName("java.lang.VirtualThread");
+            return true;
+        } catch (ClassNotFoundException e) {
+            return false;
+        }
+    }
+    
     public void register(System system, Stage stage) {
         SystemEntry entry = new SystemEntry(system, stage);
         systems.put(system.name, entry);
         orderDirty = true;
     }
     
-    /**
-     * Register system with dependencies.
-     */
     public void register(System system, Stage stage, String... dependencies) {
         SystemEntry entry = new SystemEntry(system, stage);
         entry.dependencies.addAll(Arrays.asList(dependencies));
@@ -98,9 +153,6 @@ public final class SystemScheduler {
         orderDirty = true;
     }
     
-    /**
-     * Add dependency between systems.
-     */
     public void addDependency(String systemName, String dependsOn) {
         SystemEntry entry = systems.get(systemName);
         SystemEntry depEntry = systems.get(dependsOn);
@@ -112,13 +164,9 @@ public final class SystemScheduler {
         }
     }
     
-    /**
-     * Unregister a system.
-     */
     public void unregister(String systemName) {
         SystemEntry entry = systems.remove(systemName);
         if (entry != null) {
-            // Remove from dependents
             for (String dep : entry.dependencies) {
                 SystemEntry depEntry = systems.get(dep);
                 if (depEntry != null) {
@@ -129,27 +177,25 @@ public final class SystemScheduler {
         }
     }
     
-    /**
-     * Initialize all systems.
-     */
     public void initialize(World world) {
         rebuildOrder();
         
+        // Parallel initialization where possible
         for (Stage stage : Stage.values()) {
-            for (SystemEntry entry : stageOrder.get(stage)) {
+            List<SystemEntry> entries = stageOrder.get(stage);
+            if (entries.isEmpty()) continue;
+            
+            entries.parallelStream().forEach(entry -> {
                 try {
                     entry.system.initialize(world);
                 } catch (Exception e) {
                     FPSFlux.LOGGER.error("[ECS] Failed to initialize system {}: {}", 
                         entry.system.name, e.getMessage());
                 }
-            }
+            });
         }
     }
     
-    /**
-     * Execute a specific stage.
-     */
     public void executeStage(World world, Stage stage, float deltaTime) {
         if (orderDirty) {
             rebuildOrder();
@@ -158,113 +204,132 @@ public final class SystemScheduler {
         List<SystemEntry> stageSystems = stageOrder.get(stage);
         if (stageSystems.isEmpty()) return;
         
-        // Reset completion flags
-        for (SystemEntry entry : stageSystems) {
-            entry.completed = false;
-        }
+        stageSystems.forEach(e -> {
+            e.completed = false;
+            e.executing = false;
+        });
         
-        // Execute systems respecting dependencies
         if (parallelism > 1 && stageSystems.size() > 1) {
-            executeParallel(world, stageSystems, deltaTime);
+            executeParallelStructured(world, stageSystems, deltaTime);
         } else {
             executeSequential(world, stageSystems, deltaTime);
         }
     }
     
-    /**
-     * Execute all stages in order.
-     */
     public void executeAll(World world, float deltaTime) {
         for (Stage stage : Stage.values()) {
             executeStage(world, stage, deltaTime);
         }
     }
     
-    /**
-     * Sequential execution.
-     */
     private void executeSequential(World world, List<SystemEntry> entries, float deltaTime) {
         for (SystemEntry entry : entries) {
             if (!entry.system.enabled) {
                 entry.completed = true;
                 continue;
             }
-            
             executeSystem(world, entry, deltaTime);
         }
     }
     
     /**
-     * Parallel execution with dependency respect.
+     * Structured concurrent execution with proper cancellation propagation.
      */
-    private void executeParallel(World world, List<SystemEntry> entries, float deltaTime) {
-        CountDownLatch latch = new CountDownLatch(entries.size());
-        AtomicInteger completed = new AtomicInteger(0);
-        
-        // Submit all systems that have no unmet dependencies
-        for (SystemEntry entry : entries) {
-            if (!entry.system.enabled) {
-                entry.completed = true;
-                latch.countDown();
-                completed.incrementAndGet();
-                continue;
+    private void executeParallelStructured(World world, List<SystemEntry> entries, float deltaTime) {
+        try (var scope = new StructuredTaskScope.ShutdownOnFailure()) {
+            
+            // Create dependency-aware task graph
+            Map<String, StructuredTaskScope.Subtask<Void>> taskMap = new ConcurrentHashMap<>();
+            
+            for (SystemEntry entry : entries) {
+                if (!entry.system.enabled) {
+                    entry.completed = true;
+                    continue;
+                }
+                
+                StructuredTaskScope.Subtask<Void> task = scope.fork(() -> {
+                    waitForDependencies(entry, taskMap);
+                    executeSystem(world, entry, deltaTime);
+                    entry.completed = true;
+                    return null;
+                });
+                
+                taskMap.put(entry.system.name, task);
             }
             
-            submitWhenReady(world, entry, deltaTime, latch, entries);
-        }
-        
-        try {
-            latch.await(10, TimeUnit.SECONDS);
+            scope.join();
+            scope.throwIfFailed();
+            
         } catch (InterruptedException e) {
             FPSFlux.LOGGER.warn("[ECS] System execution interrupted");
             Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            FPSFlux.LOGGER.error("[ECS] System execution failed: {}", e.getMessage());
         }
     }
     
-    private void submitWhenReady(World world, SystemEntry entry, float deltaTime,
-                                  CountDownLatch latch, List<SystemEntry> allEntries) {
-        executor.submit(() -> {
-            // Wait for dependencies
-            while (!entry.dependencies.isEmpty()) {
-                boolean allDepsComplete = true;
-                for (String dep : entry.dependencies) {
-                    SystemEntry depEntry = systems.get(dep);
-                    if (depEntry != null && !depEntry.completed) {
-                        allDepsComplete = false;
-                        break;
-                    }
-                }
-                
-                if (allDepsComplete) break;
-                
-                try {
-                    Thread.sleep(1);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
+    /**
+     * Wait for dependencies with exponential backoff.
+     */
+    private void waitForDependencies(SystemEntry entry, Map<String, StructuredTaskScope.Subtask<Void>> taskMap) {
+        if (entry.dependencies.isEmpty()) return;
+        
+        int backoff = 1;
+        while (!allDependenciesComplete(entry)) {
+            try {
+                Thread.sleep(Math.min(backoff, 50));
+                backoff *= 2;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
             }
-            
-            executeSystem(world, entry, deltaTime);
-            entry.completed = true;
-            latch.countDown();
-        });
+        }
     }
     
-    /**
-     * Execute a single system.
-     */
+    private boolean allDependenciesComplete(SystemEntry entry) {
+        for (String dep : entry.dependencies) {
+            SystemEntry depEntry = systems.get(dep);
+            if (depEntry != null && !depEntry.completed) {
+                return false;
+            }
+        }
+        return true;
+    }
+    
     private void executeSystem(World world, SystemEntry entry, float deltaTime) {
+        if (entry.executing) return;
+        entry.executing = true;
+        
         System system = entry.system;
         long startTime = java.lang.System.nanoTime();
+        int entityCount = 0;
+        
+        SystemExecutionEvent event = null;
+        if (profilingEnabled) {
+            event = new SystemExecutionEvent();
+            event.systemName = system.name;
+            event.stage = entry.stage.name();
+            event.begin();
+        }
         
         try {
             system.onBeforeUpdate(world, deltaTime);
             
-            // Find matching archetypes
-            for (Archetype archetype : world.getArchetypes()) {
-                if (system.matchesArchetype(archetype)) {
+            List<Archetype> matchingArchetypes = world.getArchetypes().stream()
+                .filter(system::matchesArchetype)
+                .toList();
+            
+            // Work-stealing parallel archetype processing for large systems
+            if (matchingArchetypes.size() > 4 && parallelism > 1) {
+                workStealingPool.submit(() ->
+                    matchingArchetypes.parallelStream().forEach(archetype -> {
+                        system.update(world, archetype, deltaTime);
+                    })
+                ).join();
+            } else {
+                for (Archetype archetype : matchingArchetypes) {
                     system.update(world, archetype, deltaTime);
+                    entityCount += archetype.getEntityCount();
                 }
             }
             
@@ -276,35 +341,43 @@ public final class SystemScheduler {
         }
         
         long endTime = java.lang.System.nanoTime();
-        system.lastExecutionTimeNanos = endTime - startTime;
-        system.totalExecutionTimeNanos += system.lastExecutionTimeNanos;
+        long duration = endTime - startTime;
+        
+        system.lastExecutionTimeNanos = duration;
+        system.totalExecutionTimeNanos += duration;
         system.executionCount++;
+        entry.executionTime.add(duration);
+        
+        if (event != null) {
+            event.durationNanos = duration;
+            event.entityCount = entityCount;
+            event.commit();
+        }
         
         entry.completed = true;
+        entry.executing = false;
     }
     
     /**
-     * Rebuild execution order based on priorities and dependencies.
+     * Rebuild execution order using Tarjan's algorithm for cycle detection.
      */
     private void rebuildOrder() {
         for (Stage stage : Stage.values()) {
             stageOrder.get(stage).clear();
         }
         
-        // Group by stage
         for (SystemEntry entry : systems.values()) {
             stageOrder.get(entry.stage).add(entry);
         }
         
-        // Sort each stage by priority
         for (Stage stage : Stage.values()) {
             List<SystemEntry> stageSystems = stageOrder.get(stage);
             stageSystems.sort(Comparator.comparingInt(e -> e.system.priority));
         }
         
-        // Topological sort within each stage for dependencies
+        // Tarjan's strongly connected components for cycle detection
         for (Stage stage : Stage.values()) {
-            List<SystemEntry> sorted = topologicalSort(stageOrder.get(stage));
+            List<SystemEntry> sorted = tarjanTopologicalSort(stageOrder.get(stage));
             stageOrder.put(stage, sorted);
         }
         
@@ -312,53 +385,94 @@ public final class SystemScheduler {
     }
     
     /**
-     * Topological sort for dependency ordering.
+     * Tarjan's algorithm for topological sort with cycle detection.
      */
-    private List<SystemEntry> topologicalSort(List<SystemEntry> entries) {
+    private List<SystemEntry> tarjanTopologicalSort(List<SystemEntry> entries) {
+        Map<String, GraphNode> nodes = entries.stream()
+            .collect(Collectors.toMap(e -> e.system.name, GraphNode::new));
+        
+        Deque<GraphNode> stack = new ArrayDeque<>();
+        List<List<GraphNode>> stronglyConnected = new ArrayList<>();
+        AtomicInteger index = new AtomicInteger(0);
+        
+        for (GraphNode node : nodes.values()) {
+            if (node.index == -1) {
+                tarjanStrongConnect(node, nodes, stack, stronglyConnected, index);
+            }
+        }
+        
+        // Check for cycles
+        for (List<GraphNode> component : stronglyConnected) {
+            if (component.size() > 1) {
+                String cycle = component.stream()
+                    .map(n -> n.entry.system.name)
+                    .collect(Collectors.joining(" -> "));
+                FPSFlux.LOGGER.error("[ECS] Circular dependency detected: {}", cycle);
+            }
+        }
+        
+        // Topological sort
         List<SystemEntry> result = new ArrayList<>();
         Set<String> visited = new HashSet<>();
-        Set<String> visiting = new HashSet<>();
         
         for (SystemEntry entry : entries) {
             if (!visited.contains(entry.system.name)) {
-                topologicalSortVisit(entry, entries, visited, visiting, result);
+                topologicalVisit(entry, nodes, visited, result);
             }
         }
         
         return result;
     }
     
-    private void topologicalSortVisit(SystemEntry entry, List<SystemEntry> entries,
-                                       Set<String> visited, Set<String> visiting,
-                                       List<SystemEntry> result) {
-        if (visiting.contains(entry.system.name)) {
-            FPSFlux.LOGGER.warn("[ECS] Circular dependency detected involving: {}", entry.system.name);
-            return;
-        }
+    private void tarjanStrongConnect(GraphNode node, Map<String, GraphNode> nodes,
+                                     Deque<GraphNode> stack, List<List<GraphNode>> components,
+                                     AtomicInteger index) {
+        node.index = index.get();
+        node.lowLink = index.get();
+        index.incrementAndGet();
+        stack.push(node);
+        node.onStack = true;
         
-        if (visited.contains(entry.system.name)) {
-            return;
-        }
-        
-        visiting.add(entry.system.name);
-        
-        for (String depName : entry.dependencies) {
-            SystemEntry depEntry = systems.get(depName);
-            if (depEntry != null && entries.contains(depEntry)) {
-                topologicalSortVisit(depEntry, entries, visited, visiting, result);
+        for (String depName : node.entry.dependencies) {
+            GraphNode depNode = nodes.get(depName);
+            if (depNode == null) continue;
+            
+            if (depNode.index == -1) {
+                tarjanStrongConnect(depNode, nodes, stack, components, index);
+                node.lowLink = Math.min(node.lowLink, depNode.lowLink);
+            } else if (depNode.onStack) {
+                node.lowLink = Math.min(node.lowLink, depNode.index);
             }
         }
         
-        visiting.remove(entry.system.name);
+        if (node.lowLink == node.index) {
+            List<GraphNode> component = new ArrayList<>();
+            GraphNode w;
+            do {
+                w = stack.pop();
+                w.onStack = false;
+                component.add(w);
+            } while (w != node);
+            components.add(component);
+        }
+    }
+    
+    private void topologicalVisit(SystemEntry entry, Map<String, GraphNode> nodes,
+                                   Set<String> visited, List<SystemEntry> result) {
+        if (visited.contains(entry.system.name)) return;
         visited.add(entry.system.name);
+        
+        for (String depName : entry.dependencies) {
+            GraphNode depNode = nodes.get(depName);
+            if (depNode != null) {
+                topologicalVisit(depNode.entry, nodes, visited, result);
+            }
+        }
+        
         result.add(entry);
     }
     
-    /**
-     * Shutdown all systems.
-     */
     public void shutdown(World world) {
-        // Shutdown in reverse order
         List<Stage> reverseStages = Arrays.asList(Stage.values());
         Collections.reverse(reverseStages);
         
@@ -366,63 +480,74 @@ public final class SystemScheduler {
             List<SystemEntry> stageSystems = new ArrayList<>(stageOrder.get(stage));
             Collections.reverse(stageSystems);
             
-            for (SystemEntry entry : stageSystems) {
+            stageSystems.parallelStream().forEach(entry -> {
                 try {
                     entry.system.shutdown(world);
                 } catch (Exception e) {
                     FPSFlux.LOGGER.error("[ECS] Failed to shutdown system {}: {}",
                         entry.system.name, e.getMessage());
                 }
-            }
+            });
         }
         
         executor.shutdown();
+        workStealingPool.shutdown();
+        
         try {
             executor.awaitTermination(5, TimeUnit.SECONDS);
+            workStealingPool.awaitTermination(5, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             executor.shutdownNow();
+            workStealingPool.shutdownNow();
         }
     }
     
-    /**
-     * Get system by name.
-     */
     public System getSystem(String name) {
         SystemEntry entry = systems.get(name);
         return entry != null ? entry.system : null;
     }
     
-    /**
-     * Get all systems in a stage.
-     */
     public List<System> getSystemsInStage(Stage stage) {
         return stageOrder.get(stage).stream()
             .map(e -> e.system)
             .toList();
     }
     
-    /**
-     * Get performance report.
-     */
+    public void enableProfiling(boolean enabled) {
+        this.profilingEnabled = enabled;
+    }
+    
     public String getPerformanceReport() {
-        StringBuilder sb = new StringBuilder("=== ECS System Performance ===\n");
+        StringBuilder sb = new StringBuilder("=== ECS System Performance Report ===\n");
+        sb.append(String.format("Execution Mode: %s\n", 
+            useVirtualThreads ? "Virtual Threads" : "Platform Threads"));
+        sb.append(String.format("Parallelism: %d\n\n", parallelism));
         
         for (Stage stage : Stage.values()) {
             List<SystemEntry> stageSystems = stageOrder.get(stage);
             if (stageSystems.isEmpty()) continue;
             
-            sb.append("\n").append(stage).append(":\n");
+            sb.append(stage).append(":\n");
             for (SystemEntry entry : stageSystems) {
                 System s = entry.system;
-                sb.append(String.format("  %-30s: %.3f ms (avg: %.3f ms, count: %d)%s\n",
+                sb.append(String.format("  %-30s: %.3f ms (avg: %.3f ms, %d exec)%s\n",
                     s.name,
                     s.getLastExecutionTimeMs(),
                     s.getAverageExecutionTimeMs(),
                     s.executionCount,
                     s.enabled ? "" : " [DISABLED]"));
             }
+            sb.append("\n");
         }
         
         return sb.toString();
+    }
+    
+    public Map<String, Double> getSystemMetrics() {
+        return systems.entrySet().stream()
+            .collect(Collectors.toMap(
+                Map.Entry::getKey,
+                e -> e.getValue().system.getAverageExecutionTimeMs()
+            ));
     }
 }
