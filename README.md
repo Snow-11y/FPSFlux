@@ -23,7 +23,7 @@
 <img src="https://img.shields.io/badge/%E2%9C%A7%20v0.2.0-80cbc4?style=for-the-badge&labelColor=0d0d1a" height="38"/>
 </picture>
 <picture>
-<img src="https://img.shields.io/badge/%E2%9C%A7%20MIT-a5d6a7?style=for-the-badge&labelColor=0d0d1a" height="38"/>
+<img src="https://img.shields.io/badge/%E2%9C%A7%20GPL-3.0-a5d6a7?style=for-the-badge&labelColor=0d0d1a" height="38"/>
 </picture>
 </p>
 
