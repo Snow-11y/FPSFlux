@@ -17,7 +17,7 @@
 <img src="https://img.shields.io/badge/%E2%9C%A7%20MC%201.12.2-b388ff?style=for-the-badge&labelColor=0d0d1a" height="38"/>
 </picture>
 <picture>
-<img src="https://img.shields.io/badge/%E2%9C%A7%20CLEANROOM-82b1ff?style=for-the-badge&labelColor=0d0d1a" height="38"/>
+<img src="https://img.shields.io/badge/%E2%9C%A7%20SNOWY-82b1ff?style=for-the-badge&labelColor=0d0d1a" height="38"/>
 </picture>
 <picture>
 <img src="https://img.shields.io/badge/%E2%9C%A7%20v0.2.0-80cbc4?style=for-the-badge&labelColor=0d0d1a" height="38"/>
