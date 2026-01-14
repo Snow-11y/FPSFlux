@@ -2442,12 +2442,12 @@ Porter enables FPSFlux (and any mod using it) to work across ALL mod loaders wit
 
 <div align="center">
 
-## 🚫 Blacklisted Mods
+## 🚫 Blacklisted & Incompatible Mods
 
 <table>
 <tr>
 <td align="center">
-<img src="https://img.shields.io/badge/⚠️%20IMPORTANT%20COMPATIBILITY%20NOTICE-ffd54f?style=for-the-badge&labelColor=0d0d1a"/>
+<img src="https://img.shields.io/badge/⚠️%20CRITICAL%20COMPATIBILITY%20NOTICE-ffd54f?style=for-the-badge&labelColor=0d0d1a"/>
 </td>
 </tr>
 </table>
@@ -2470,8 +2470,8 @@ Porter enables FPSFlux (and any mod using it) to work across ALL mod loaders wit
 │   ⚠️ THESE MODS ARE INCOMPATIBLE WITH FPSFLUX                    │
 │   ════════════════════════════════════════════                   │
 │                                                                  │
-│   LoliASM              →  🚫 BLACKLISTED (soon incompatible)     │
-│   MixinBooter          →  🚫 BLACKLISTED                         │
+│   LoliASM              →  🚫 BLACKLISTED     │
+│   MixinBooter          →  🚫 BLACKLISTED      │
 │   Redcore              →  🚫 BLACKLISTED                         │
 │   Valkyrie             →  🚫 BLACKLISTED                         │
 │   Alfhiem/Alfhirm      →  🚫 BLACKLISTED                         │
@@ -2496,33 +2496,151 @@ All blacklisted mods share one or more of these issues:
 | 🚫 **Toxic/Racist/Illegal Behavior** | Authors have engaged in toxic behavior or actions that may be illegal |
 | 💖 **Community Safety** | We refuse to support mods from authors who create unsafe environments |
 | 🔄 **Better Alternatives** | FPSFlux provides equivalent or superior functionality where applicable |
+| ⚙️ **Technical Obsolescence** | MixinBooter no longer needed - FF uses DeepMix internally |
+
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td width="100%">
+
+### ⚠️ Partially Incompatible Mods
+
+<div align="center">
+
+```
+╭──────────────────────────────────────────────────────────────────╮
+│                                                                  │
+│   ⚠️ THESE MODS WILL NOT CRASH BUT CANNOT BE MODIFIED           │
+│   ═══════════════════════════════════════════════════            │
+│                                                                  │
+│   UniMixin             →  ⚠️  PARTIALLY INCOMPATIBLE             │
+│   FremiumBooter        →  ⚠️  PARTIALLY INCOMPATIBLE             │
+│                                                                  │
+│   These mods use protection that prevents FF from applying       │
+│   optimizations to them. They will load and run, but:            │
+│   ├── FF's Forge event hooks cannot modify them                  │
+│   ├── FF's mixin system cannot target them                       │
+│   ├── FF's ASM transformers cannot optimize them                 │
+│   └── Any other mixin mods cannot tap into them either           │
+│                                                                  │
+│   Once DeepMix is released, FF will be able to affect any mod    │
+│   including these protected ones.                                │
+│                                                                  │
+╰──────────────────────────────────────────────────────────────────╯
+```
+
+</div>
+
+**Technical Details:**
+
+| Mod | Status | Reason |
+|:---|:---|:---|
+| **UniMixin** | ⚠️ Runs but protected | Uses internal protection preventing external mixin/ASM modification |
+| **FremiumBooter** | ⚠️ Runs but protected | Similar protection layer blocks FF's transformation pipeline |
+
+**Impact on Your Game:**
+
+- ✅ Game will **NOT** crash
+- ⚠️ These mods won't receive FF's performance optimizations
+- ⚠️ Any bugs in these mods cannot be patched by FF
+- ⚠️ No mixin mod (not just FF) can modify their behavior
+- ✅ Once **DeepMix** releases, all restrictions lifted
+
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td width="100%">
+
+### 🔒 Blacklist Enforcement
 
 **Technical Implementation:**
 
 ```
 ╭──────────────────────────────────────────────────────────────────╮
 │                                                                  │
-│   🔒 BLACKLIST ENFORCEMENT                                       │
-│   ═════════════════════════                                      │
+│   🔒 BLACKLIST ENFORCEMENT SYSTEM                                │
+│   ═══════════════════════════════                                │
 │                                                                  │
 │   The blacklist is:                                              │
 │   ├── Hardcoded at multiple layers                               │
 │   ├── SHA-256 verified (file hash checking)                      │
-│   ├── Cannot be bypassed or disabled                             │
+│   ├── CANNOT be bypassed or disabled                             │
+│   ├── CANNOT be modified or removed                              │
 │   └── Triggers immediate graceful shutdown if detected           │
 │                                                                  │
 │   Detection Methods:                                             │
 │   ├── File hash verification (catches renames)                   │
 │   ├── Class signature scanning (catches repackaging)             │
 │   ├── Mod ID detection (catches direct conflicts)                │
-│   └── Bytecode pattern matching (catches modifications, even If a Single Byte Smaller/Larger triggers immediate corruption)          │
+│   ├── Bytecode pattern matching (catches modifications)          │
+│   └── Even 1 byte difference triggers corruption detection       │
 │                                                                  │
 │   If Tampered:                                                   │
 │   └── SHA-256 verification fails → File corruption triggered     │
-│       (The mod will not function if blacklist is modified)       │
+│       ├── The mod will NOT function if blacklist is modified     │
+│       ├── Any attempt to patch out blacklist = instant failure   │
+│       ├── Hex editing the jar = detected and rejected            │
+│       └── Decompiling and recompiling = signature mismatch       │
+│                                                                  │
+│   ⚠️  DO NOT ATTEMPT TO BYPASS THIS SYSTEM                       │
+│   ═══════════════════════════════════════                        │
+│                                                                  │
+│   Any modification to blacklist enforcement will:                │
+│   ├── Corrupt the mod's internal state                           │
+│   ├── Cause silent failures in critical systems                  │
+│   ├── Result in unpredictable behavior                           │
+│   └── Void all support from the FPSFlux team                     │
+│                                                                  │
+│   The blacklist exists for SAFETY and LEGAL reasons.             │
+│   Respect it.                                                    │
 │                                                                  │
 ╰──────────────────────────────────────────────────────────────────╯
 ```
+
+**Enforcement Layers:**
+
+```
+╭──────────────────────────────────────────────────────────────────╮
+│                                                                  │
+│   LAYER 1: Pre-Init Scan                                         │
+│   ├── Scans mods folder before Forge loads anything              │
+│   ├── Checks file hashes against blacklist database              │
+│   └── Prevents game launch if blacklisted mod detected           │
+│                                                                  │
+│   LAYER 2: Class Loading Hook                                    │
+│   ├── Intercepts all class loading attempts                      │
+│   ├── Matches class signatures against blacklist patterns        │
+│   └── Refuses to load blacklisted mod classes                    │
+│                                                                  │
+│   LAYER 3: Runtime Verification                                  │
+│   ├── Periodic checks during gameplay                            │
+│   ├── Detects if blacklisted mods loaded via other means         │
+│   └── Immediate shutdown if violation detected                   │
+│                                                                  │
+│   LAYER 4: Integrity Seal                                        │
+│   ├── FPSFlux jar is self-verifying                              │
+│   ├── Blacklist code cannot be removed without breaking FF       │
+│   ├── Any tampering detected = mod refuses to initialize         │
+│   └── Cryptographic signatures prevent modification              │
+│                                                                  │
+╰──────────────────────────────────────────────────────────────────╯
+```
+
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td width="100%">
+
+### ✓ Migration Path
 
 **What To Do:**
 
@@ -2533,25 +2651,57 @@ All blacklisted mods share one or more of these issues:
 │   ═════════════════════════════                                  │
 │                                                                  │
 │   1. Remove all blacklisted mods from your mods folder           │
-│   2. Install FPSFlux (currently needs MixinBooter)                                             │
+│   2. Install FPSFlux (no longer needs MixinBooter)               │
 │   3. Enjoy better performance with a safer community             │
 │                                                                  │
 │   FPSFlux provides:                                              │
-│   ├── Optimizations that replace most blacklisted functionality  │
-│   ├── Mixin support via DeepMix (when MixinBooter is removed)    │
+│   ├── Optimizations that replace blacklisted functionality       │
+│   ├── Mixin support via DeepMix (built-in)                       │
 │   ├── 120+ optimization systems                                  │
 │   └── A community built on safety and respect                    │
 │                                                                  │
-│   Note: MixinBooter can remain temporarily until DeepMix release │
-│         Groovyscript can remain temporarily until PolyLang       │
-│         HadEnoughItems can remain temporarily until merged with FF       │
-│         Flare can remain temporarily until merged with FF       │
-│         Alfhiem can remain temporarily until merged with FF       │
-│         RedCore can remain temporarily until merged with FF       │
-│         Valkyrie can remain temporarily until merged with FF       │
+│   Temporary Compatibility Notes:                                 │
+│   ├── Groovyscript can remain until PolyLang releases            │
+│   ├── HadEnoughItems can remain until merged with FF             │
+│   ├── Flare can remain until merged with FF                      │
+│   ├── Alfhiem can remain until merged with FF                    │
+│   ├── RedCore can remain until merged with FF                    │
+│   └── Valkyrie can remain until merged with FF                   │
+│                                                                  │
+│   Once MDR (Mini-DirtyRoom) releases:                            │
+│   └── FF can run on Forge without Cleanroom required             │
 │                                                                  │
 ╰──────────────────────────────────────────────────────────────────╯
 ```
+
+**Future Compatibility:**
+
+```
+╭──────────────────────────────────────────────────────────────────╮
+│                                                                  │
+│   🚀 UPCOMING: DEEPMIX SYSTEM                                    │
+│   ═══════════════════════════                                    │
+│                                                                  │
+│   When DeepMix is released:                                      │
+│   ├── FF can affect ANY mod (including protected ones)           │
+│   ├── No mod can hide from FF's optimization pipeline            │
+│   ├── UniMixin and FremiumBooter protection bypassed             │
+│   └── Full transformation capability across entire modpack       │
+│                                                                  │
+│   🚀 UPCOMING: MDR (MINI-DIRTYROOM)                              │
+│   ═══════════════════════════════════                            │
+│                                                                  │
+│   When MDR is released:                                          │
+│   ├── Run FF on standard Forge (no Cleanroom needed)             │
+│   ├── Broader compatibility with existing modpacks               │
+│   └── Easier installation for end users                          │
+│                                                                  │
+╰──────────────────────────────────────────────────────────────────╯
+```
+
+</td>
+</tr>
+</table>
 
 <div align="center">
 
@@ -2559,15 +2709,16 @@ All blacklisted mods share one or more of these issues:
 
 <br/><br/>
 
-<sub>We don't make this decision lightly. Blacklisting is a last resort, used only when a mod's<br/>authorship actively harms or endangers the community we're trying to help.</sub>
+<sub>We don't make this decision lightly. Blacklisting is a last resort, used only when a mod's<br/> authorship actively harms or endangers the community we're trying to help.</sub>
+
+<br/><br/>
+
+<sub>The enforcement system is non-negotiable and cannot be bypassed.<br/>Attempting to circumvent it will result in mod corruption and loss of support.</sub>
 
 </div>
 
-</td>
-</tr>
-</table>
-
 ---
+
 
 <!-- ═══════════════════════════════════════════════════════════════════════════════ -->
 <!-- SECTION: COMPATIBILITY -->
@@ -2700,7 +2851,7 @@ All blacklisted mods share one or more of these issues:
 │                                                                  │
 │   5. Remove incompatible mods (if present)                       │
 │      ├── LoliASM (blacklisted)                                   │
-│      ├── MixinBooter (blacklisted, soon will be incompatible, currently add it)                               │
+│      ├── MixinBooter (blacklisted)                               │
 │      ├── Nothirium (replaced)                                    │
 │      └── VulkanMod (replaced)                                    │
 │                                                                  │
