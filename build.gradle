@@ -136,7 +136,7 @@ tasks.withType(JavaCompile).configureEach {
     
     // Critical: Set source compatibility to 25 to allow modern syntax
     sourceCompatibility = 25
-    targetCompatibility = 8
+    targetCompatibility = 25
     
     // Remove the release option - it conflicts with Jabel
     // Jabel will handle downcompiling modern bytecode to Java 8
