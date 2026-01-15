@@ -65,12 +65,12 @@ minecraft {
 // ============== REPOSITORIES ==============
 repositories {
     maven {
-        name 'CleanroomMC Maven'
-        url 'https://maven.cleanroommc.com'
+        name = 'CleanroomMC Maven'
+        url = 'https://maven.cleanroommc.com'
     }
     maven {
-        name 'SpongePowered Maven'
-        url 'https://repo.spongepowered.org/maven'
+        name = 'SpongePowered Maven'
+        url = 'https://repo.spongepowered.org/maven'
     }
 }
 
@@ -134,8 +134,18 @@ tasks.withType(JavaCompile).configureEach {
         return
     }
     
+    // Critical: Set source compatibility to 25 to allow modern syntax
     sourceCompatibility = 25
-    options.release.set(8)
+    targetCompatibility = 8
+    
+    // Remove the release option - it conflicts with Jabel
+    // Jabel will handle downcompiling modern bytecode to Java 8
+    options.compilerArgs.addAll([
+        '-Xplugin:Jabel',
+        // Suppress warnings about preview features and restricted type names
+        '-Xlint:-preview',
+        '-Xlint:-restricted'
+    ])
 }
 
 // ============== IDEA CONFIGURATION ==============
