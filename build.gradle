@@ -1,6 +1,7 @@
 /**
  * FpsFlux Mod - Build Configuration
  * Minecraft 1.12.2 with RetroFuturaGradle
+ * Full Java 25 - no compromises
  */
 
 plugins {
@@ -76,12 +77,7 @@ repositories {
 
 // ============== DEPENDENCIES ==============
 dependencies {
-    // Modern Java syntax support (Jabel)
-    annotationProcessor 'com.github.bsideup.jabel:jabel-javac-plugin:1.0.0'
-    annotationProcessor 'net.java.dev.jna:jna-platform:5.13.0'
-    compileOnly('com.github.bsideup.jabel:jabel-javac-plugin:1.0.0') {
-        transitive = false
-    }
+    // Java 8+ compatibility shim for modern Java versions
     patchedMinecraft 'me.eigenraven.java8unsupported:java-8-unsupported-shim:1.0.0'
     
     // Mixin support via MixinBooter
@@ -119,7 +115,8 @@ jar {
         attributes(
             'FMLCorePlugin': coremodClass,
             'FMLCorePluginContainsFMLMod': 'true',
-            'ForceLoadAsMod': 'true'
+            'ForceLoadAsMod': 'true',
+            'Multi-Release': 'true'
         )
     }
     // Embed dependencies
@@ -134,18 +131,23 @@ tasks.withType(JavaCompile).configureEach {
         return
     }
     
-    // Critical: Set source compatibility to 25 to allow modern syntax
+    // Full Java 25 - source and target
     sourceCompatibility = 25
     targetCompatibility = 25
     
-    // Remove the release option - it conflicts with Jabel
-    // Jabel will handle downcompiling modern bytecode to Java 8
+    // Enable preview features
     options.compilerArgs.addAll([
-        '-Xplugin:Jabel',
-        // Suppress warnings about preview features and restricted type names
-        '-Xlint:-preview',
-        '-Xlint:-restricted'
+        '--enable-preview',
+        '-parameters'
     ])
+}
+
+tasks.withType(JavaExec).configureEach {
+    jvmArgs += ['--enable-preview']
+}
+
+tasks.withType(Test).configureEach {
+    jvmArgs += ['--enable-preview']
 }
 
 // ============== IDEA CONFIGURATION ==============
@@ -171,7 +173,7 @@ idea {
             }
             compiler.javac {
                 afterEvaluate {
-                    javacAdditionalOptions = "-encoding utf8"
+                    javacAdditionalOptions = "-encoding utf8 --enable-preview"
                     moduleJavacAdditionalOptions = [
                         (project.name + ".main"): tasks.compileJava.options.compilerArgs.collect { '"' + it + '"' }.join(' ')
                     ]
