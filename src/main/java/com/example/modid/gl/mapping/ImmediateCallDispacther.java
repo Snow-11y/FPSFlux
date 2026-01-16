@@ -3,9 +3,9 @@ package com.example.gl.dispatch;
 import com.example.gl.mapping.GLESCallMapper;
 import com.example.gl.mapping.GLSLCallMapper;
 import com.example.gl.mapping.MetalCallMapper;
-import com.example.gl.mapping.OpenGLCallMapper;
+import com.example.gl.mapping.GLCallMapper;
 import com.example.gl.mapping.SPIRVCallMapper;
-import com.example.gl.mapping.VulkanCallMapper;
+import com.example.gl.mapping.VulkanCallMapperX;
 
 import java.lang.invoke.*;
 import java.lang.foreign.*;
