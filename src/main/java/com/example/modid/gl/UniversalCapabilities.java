@@ -20,7 +20,7 @@ import java.util.regex.Pattern;
  * 
  * Acts as a universal control panel that validates user preferences against hardware capabilities.
  * 
- * @author Enhanced Graphics Capability System
+ * @snowy Enhanced Graphics Capability System
  * @version 2.0.0
  */
 public class UniversalCapabilities {
