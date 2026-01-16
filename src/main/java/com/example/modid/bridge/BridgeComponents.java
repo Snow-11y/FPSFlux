@@ -1,299 +1,286 @@
 package com.example.modid.bridge;
 
-import com.example.modid.ecs.ComponentRegistry;
-import net.minecraft.entity.Entity;
+import jdk.incubator.vector.DoubleVector;
+import jdk.incubator.vector.FloatVector;
+import jdk.incubator.vector.VectorOperators;
+import jdk.incubator.vector.VectorSpecies;
 
-import java.lang.foreign.*;
+import java.lang.foreign.MemoryLayout;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.StructLayout;
+import java.lang.foreign.ValueLayout;
 import java.lang.invoke.VarHandle;
 
 /**
- * BridgeComponents - Memory-efficient component definitions using Panama FFM.
- * 
- * <h2>Design Principles:</h2>
- * <ul>
- *   <li>Cache-line aligned for optimal CPU cache utilization</li>
- *   <li>Packed structs to minimize memory footprint</li>
- *   <li>VarHandle accessors for JIT-optimized field access</li>
- *   <li>Immutable layout definitions (thread-safe by design)</li>
- * </ul>
+ * BridgeComponents - Memory layout definitions and high-performance accessors.
+ *
+ * <h2>Entity Memory Block Layout (256 bytes total):</h2>
+ * <pre>
+ * Offset  Size  Field
+ * ------  ----  -----
+ * 0       64    Transform (current)
+ *   0       8     x (double)
+ *   8       8     y (double)
+ *   16      8     z (double)
+ *   24      4     yaw (float)
+ *   28      4     pitch (float)
+ *   32      4     roll (float)
+ *   36      4     flags (int)
+ *   40      24    [padding]
+ *
+ * 64      64    Transform (previous, for interpolation)
+ *   [same layout as current]
+ *
+ * 128     32    Velocity
+ *   128     8     vx (double)
+ *   136     8     vy (double)
+ *   144     8     vz (double)
+ *   152     4     speed (float - cached magnitude)
+ *   156     4     [padding]
+ *
+ * 160     32    Acceleration
+ *   160     8     ax (double)
+ *   168     8     ay (double)
+ *   176     8     az (double)
+ *   184     8     [padding]
+ *
+ * 192     32    Metadata
+ *   192     4     mcEntityId (int)
+ *   196     4     ecsEntityId (int)
+ *   200     8     flags (long)
+ *   208     8     lastSyncTick (long)
+ *   216     8     [padding]
+ *
+ * 224     32    Reserved/User Data
+ * </pre>
  */
 public final class BridgeComponents {
-    
-    private BridgeComponents() {} // Prevent instantiation
+
+    private BridgeComponents() {}
 
     // ========================================================================
-    // TRANSFORM COMPONENT
+    // VECTOR API SPECIES (For SIMD operations)
     // ========================================================================
 
-    /**
-     * Position and rotation data.
-     * Layout: [x:f64, y:f64, z:f64, yaw:f32, pitch:f32, _pad:8bytes]
-     * Total: 40 bytes, aligned to 64 bytes for cache efficiency.
-     */
-    @ComponentRegistry.ComponentMeta(
-        size = 40, 
-        alignment = 64,
-        gpuSync = true,
-        description = "Entity position and rotation in world space"
-    )
-    public static final class Transform {
-        
-        public static final StructLayout LAYOUT = MemoryLayout.structLayout(
+    public static final VectorSpecies<Double> DOUBLE_SPECIES = DoubleVector.SPECIES_PREFERRED;
+    public static final VectorSpecies<Float> FLOAT_SPECIES = FloatVector.SPECIES_PREFERRED;
+
+    // ========================================================================
+    // TRANSFORM OFFSETS (Current)
+    // ========================================================================
+
+    public static final long TRANSFORM_X = 0L;
+    public static final long TRANSFORM_Y = 8L;
+    public static final long TRANSFORM_Z = 16L;
+    public static final long TRANSFORM_YAW = 24L;
+    public static final long TRANSFORM_PITCH = 28L;
+    public static final long TRANSFORM_ROLL = 32L;
+    public static final long TRANSFORM_FLAGS = 36L;
+    public static final long TRANSFORM_SIZE = 64L;
+
+    // ========================================================================
+    // TRANSFORM OFFSETS (Previous)
+    // ========================================================================
+
+    public static final long PREV_TRANSFORM_BASE = 64L;
+    public static final long PREV_TRANSFORM_X = PREV_TRANSFORM_BASE + 0L;
+    public static final long PREV_TRANSFORM_Y = PREV_TRANSFORM_BASE + 8L;
+    public static final long PREV_TRANSFORM_Z = PREV_TRANSFORM_BASE + 16L;
+    public static final long PREV_TRANSFORM_YAW = PREV_TRANSFORM_BASE + 24L;
+    public static final long PREV_TRANSFORM_PITCH = PREV_TRANSFORM_BASE + 28L;
+    public static final long PREV_TRANSFORM_ROLL = PREV_TRANSFORM_BASE + 32L;
+
+    // ========================================================================
+    // VELOCITY OFFSETS
+    // ========================================================================
+
+    public static final long VELOCITY_BASE = 128L;
+    public static final long VELOCITY_X = VELOCITY_BASE + 0L;
+    public static final long VELOCITY_Y = VELOCITY_BASE + 8L;
+    public static final long VELOCITY_Z = VELOCITY_BASE + 16L;
+    public static final long VELOCITY_SPEED = VELOCITY_BASE + 24L;
+    public static final long VELOCITY_SIZE = 32L;
+
+    // ========================================================================
+    // ACCELERATION OFFSETS
+    // ========================================================================
+
+    public static final long ACCEL_BASE = 160L;
+    public static final long ACCEL_X = ACCEL_BASE + 0L;
+    public static final long ACCEL_Y = ACCEL_BASE + 8L;
+    public static final long ACCEL_Z = ACCEL_BASE + 16L;
+    public static final long ACCEL_SIZE = 32L;
+
+    // ========================================================================
+    // METADATA OFFSETS
+    // ========================================================================
+
+    public static final long META_BASE = 192L;
+    public static final long META_MC_ID = META_BASE + 0L;
+    public static final long META_ECS_ID = META_BASE + 4L;
+    public static final long META_FLAGS = META_BASE + 8L;
+    public static final long META_LAST_SYNC = META_BASE + 16L;
+    public static final long META_SIZE = 32L;
+
+    // ========================================================================
+    // USER DATA OFFSETS
+    // ========================================================================
+
+    public static final long USER_DATA_BASE = 224L;
+    public static final long USER_DATA_SIZE = 32L;
+
+    // ========================================================================
+    // GPU-COMPATIBLE TRANSFORM (Packed for shader upload)
+    // ========================================================================
+
+    /** Size of transform data for GPU: position (3 floats) + rotation (4 floats for quaternion) */
+    public static final int GPU_TRANSFORM_SIZE = 28; // 7 floats * 4 bytes
+
+    // ========================================================================
+    // METADATA FLAGS
+    // ========================================================================
+
+    public static final long FLAG_TRANSFORM_DIRTY = 1L << 0;
+    public static final long FLAG_VELOCITY_DIRTY = 1L << 1;
+    public static final long FLAG_ACCEL_DIRTY = 1L << 2;
+    public static final long FLAG_NEEDS_SYNC = 1L << 3;
+    public static final long FLAG_TELEPORTED = 1L << 4;
+    public static final long FLAG_DEAD = 1L << 5;
+    public static final long FLAG_INVISIBLE = 1L << 6;
+    public static final long FLAG_NO_CLIP = 1L << 7;
+
+    // ========================================================================
+    // MEMORY LAYOUT DEFINITIONS
+    // ========================================================================
+
+    public static final StructLayout TRANSFORM_LAYOUT = MemoryLayout.structLayout(
             ValueLayout.JAVA_DOUBLE.withName("x"),
             ValueLayout.JAVA_DOUBLE.withName("y"),
             ValueLayout.JAVA_DOUBLE.withName("z"),
             ValueLayout.JAVA_FLOAT.withName("yaw"),
             ValueLayout.JAVA_FLOAT.withName("pitch"),
-            MemoryLayout.paddingLayout(8)
-        ).withName("Transform").withByteAlignment(64);
+            ValueLayout.JAVA_FLOAT.withName("roll"),
+            ValueLayout.JAVA_INT.withName("flags"),
+            MemoryLayout.paddingLayout(24)
+    ).withName("Transform").withByteAlignment(64);
 
-        // Precomputed offsets for direct memory access
-        private static final long X_OFFSET = LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("x"));
-        private static final long Y_OFFSET = LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("y"));
-        private static final long Z_OFFSET = LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("z"));
-        private static final long YAW_OFFSET = LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("yaw"));
-        private static final long PITCH_OFFSET = LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("pitch"));
-
-        // VarHandles for atomic-capable access
-        private static final VarHandle X = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("x"));
-        private static final VarHandle Y = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("y"));
-        private static final VarHandle Z = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("z"));
-        private static final VarHandle YAW = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("yaw"));
-        private static final VarHandle PITCH = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("pitch"));
-
-        /**
-         * Initializes transform from a Minecraft entity.
-         */
-        public static void initialize(MemorySegment seg, Entity mcEntity) {
-            setX(seg, mcEntity.posX);
-            setY(seg, mcEntity.posY);
-            setZ(seg, mcEntity.posZ);
-            setYaw(seg, mcEntity.rotationYaw);
-            setPitch(seg, mcEntity.rotationPitch);
-        }
-
-        // Direct offset-based accessors (fastest for sequential access)
-        public static void setX(MemorySegment seg, double val) { 
-            seg.set(ValueLayout.JAVA_DOUBLE, X_OFFSET, val); 
-        }
-        public static double getX(MemorySegment seg) { 
-            return seg.get(ValueLayout.JAVA_DOUBLE, X_OFFSET); 
-        }
-        
-        public static void setY(MemorySegment seg, double val) { 
-            seg.set(ValueLayout.JAVA_DOUBLE, Y_OFFSET, val); 
-        }
-        public static double getY(MemorySegment seg) { 
-            return seg.get(ValueLayout.JAVA_DOUBLE, Y_OFFSET); 
-        }
-        
-        public static void setZ(MemorySegment seg, double val) { 
-            seg.set(ValueLayout.JAVA_DOUBLE, Z_OFFSET, val); 
-        }
-        public static double getZ(MemorySegment seg) { 
-            return seg.get(ValueLayout.JAVA_DOUBLE, Z_OFFSET); 
-        }
-
-        public static void setYaw(MemorySegment seg, float val) { 
-            seg.set(ValueLayout.JAVA_FLOAT, YAW_OFFSET, val); 
-        }
-        public static float getYaw(MemorySegment seg) { 
-            return seg.get(ValueLayout.JAVA_FLOAT, YAW_OFFSET); 
-        }
-
-        public static void setPitch(MemorySegment seg, float val) { 
-            seg.set(ValueLayout.JAVA_FLOAT, PITCH_OFFSET, val); 
-        }
-        public static float getPitch(MemorySegment seg) { 
-            return seg.get(ValueLayout.JAVA_FLOAT, PITCH_OFFSET); 
-        }
-
-        // Atomic accessors for concurrent modification (uses VarHandle)
-        public static void setXAtomic(MemorySegment seg, double val) { 
-            X.setVolatile(seg, 0L, val); 
-        }
-        public static double getXAtomic(MemorySegment seg) { 
-            return (double) X.getVolatile(seg, 0L); 
-        }
-
-        /**
-         * Copies all transform data from source to destination.
-         */
-        public static void copy(MemorySegment src, MemorySegment dst) {
-            MemorySegment.copy(src, 0, dst, 0, LAYOUT.byteSize());
-        }
-
-        /**
-         * Linearly interpolates between two transforms.
-         */
-        public static void lerp(MemorySegment from, MemorySegment to, MemorySegment out, float t) {
-            setX(out, getX(from) + (getX(to) - getX(from)) * t);
-            setY(out, getY(from) + (getY(to) - getY(from)) * t);
-            setZ(out, getZ(from) + (getZ(to) - getZ(from)) * t);
-            setYaw(out, lerpAngle(getYaw(from), getYaw(to), t));
-            setPitch(out, getPitch(from) + (getPitch(to) - getPitch(from)) * t);
-        }
-
-        private static float lerpAngle(float from, float to, float t) {
-            float diff = ((to - from + 540) % 360) - 180;
-            return from + diff * t;
-        }
-    }
-
-    // ========================================================================
-    // PREVIOUS TRANSFORM (For Interpolation)
-    // ========================================================================
-
-    @ComponentRegistry.ComponentMeta(size = 40, alignment = 64)
-    public static final class PreviousTransform {
-        
-        public static final StructLayout LAYOUT = Transform.LAYOUT.withName("PreviousTransform");
-        
-        public static void initialize(MemorySegment seg, Entity mcEntity) {
-            Transform.initialize(seg, mcEntity);
-        }
-        
-        public static double getX(MemorySegment seg) { return Transform.getX(seg); }
-        public static double getY(MemorySegment seg) { return Transform.getY(seg); }
-        public static double getZ(MemorySegment seg) { return Transform.getZ(seg); }
-        public static float getYaw(MemorySegment seg) { return Transform.getYaw(seg); }
-        public static float getPitch(MemorySegment seg) { return Transform.getPitch(seg); }
-    }
-
-    // ========================================================================
-    // VELOCITY COMPONENT
-    // ========================================================================
-
-    @ComponentRegistry.ComponentMeta(size = 24, alignment = 32)
-    public static final class Velocity {
-        
-        public static final StructLayout LAYOUT = MemoryLayout.structLayout(
+    public static final StructLayout VELOCITY_LAYOUT = MemoryLayout.structLayout(
             ValueLayout.JAVA_DOUBLE.withName("vx"),
             ValueLayout.JAVA_DOUBLE.withName("vy"),
-            ValueLayout.JAVA_DOUBLE.withName("vz")
-        ).withName("Velocity").withByteAlignment(32);
+            ValueLayout.JAVA_DOUBLE.withName("vz"),
+            ValueLayout.JAVA_FLOAT.withName("speed"),
+            MemoryLayout.paddingLayout(4)
+    ).withName("Velocity").withByteAlignment(32);
 
-        private static final long VX_OFFSET = LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("vx"));
-        private static final long VY_OFFSET = LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("vy"));
-        private static final long VZ_OFFSET = LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("vz"));
+    public static final StructLayout ACCEL_LAYOUT = MemoryLayout.structLayout(
+            ValueLayout.JAVA_DOUBLE.withName("ax"),
+            ValueLayout.JAVA_DOUBLE.withName("ay"),
+            ValueLayout.JAVA_DOUBLE.withName("az"),
+            MemoryLayout.paddingLayout(8)
+    ).withName("Acceleration").withByteAlignment(32);
 
-        public static void initialize(MemorySegment seg, Entity mcEntity) {
-            setX(seg, mcEntity.motionX);
-            setY(seg, mcEntity.motionY);
-            setZ(seg, mcEntity.motionZ);
-        }
-
-        public static void setX(MemorySegment seg, double val) { 
-            seg.set(ValueLayout.JAVA_DOUBLE, VX_OFFSET, val); 
-        }
-        public static double getX(MemorySegment seg) { 
-            return seg.get(ValueLayout.JAVA_DOUBLE, VX_OFFSET); 
-        }
-        
-        public static void setY(MemorySegment seg, double val) { 
-            seg.set(ValueLayout.JAVA_DOUBLE, VY_OFFSET, val); 
-        }
-        public static double getY(MemorySegment seg) { 
-            return seg.get(ValueLayout.JAVA_DOUBLE, VY_OFFSET); 
-        }
-        
-        public static void setZ(MemorySegment seg, double val) { 
-            seg.set(ValueLayout.JAVA_DOUBLE, VZ_OFFSET, val); 
-        }
-        public static double getZ(MemorySegment seg) { 
-            return seg.get(ValueLayout.JAVA_DOUBLE, VZ_OFFSET); 
-        }
-
-        public static double magnitudeSquared(MemorySegment seg) {
-            double vx = getX(seg), vy = getY(seg), vz = getZ(seg);
-            return vx * vx + vy * vy + vz * vz;
-        }
-    }
+    public static final StructLayout METADATA_LAYOUT = MemoryLayout.structLayout(
+            ValueLayout.JAVA_INT.withName("mcEntityId"),
+            ValueLayout.JAVA_INT.withName("ecsEntityId"),
+            ValueLayout.JAVA_LONG.withName("flags"),
+            ValueLayout.JAVA_LONG.withName("lastSyncTick"),
+            MemoryLayout.paddingLayout(8)
+    ).withName("Metadata").withByteAlignment(16);
 
     // ========================================================================
-    // METADATA COMPONENT
+    // INLINE ACCESSOR METHODS (For JIT optimization)
     // ========================================================================
 
     /**
-     * Bridge metadata for tracking entity state and flags.
+     * Reads position from component memory.
+     * Writes to provided array to avoid allocation.
      */
-    @ComponentRegistry.ComponentMeta(size = 16, alignment = 16)
-    public static final class Metadata {
-        
-        /** Flag: Entity position was modified by ECS this tick */
-        public static final int FLAG_TRANSFORM_DIRTY = 1 << 0;
-        /** Flag: Entity velocity was modified by ECS this tick */
-        public static final int FLAG_VELOCITY_DIRTY = 1 << 1;
-        /** Flag: Entity should be synchronized to server */
-        public static final int FLAG_NEEDS_SYNC = 1 << 2;
-        /** Flag: Entity is currently being processed */
-        public static final int FLAG_PROCESSING = 1 << 3;
-        /** Flag: Entity was teleported externally */
-        public static final int FLAG_EXTERNAL_TELEPORT = 1 << 4;
+    public static void getPosition(MemorySegment memory, long entityBase, double[] out) {
+        out[0] = memory.get(ValueLayout.JAVA_DOUBLE, entityBase + TRANSFORM_X);
+        out[1] = memory.get(ValueLayout.JAVA_DOUBLE, entityBase + TRANSFORM_Y);
+        out[2] = memory.get(ValueLayout.JAVA_DOUBLE, entityBase + TRANSFORM_Z);
+    }
 
-        public static final StructLayout LAYOUT = MemoryLayout.structLayout(
-            ValueLayout.JAVA_INT.withName("mcEntityId"),
-            ValueLayout.JAVA_INT.withName("flags"),
-            ValueLayout.JAVA_LONG.withName("lastSyncTick")
-        ).withName("Metadata").withByteAlignment(16);
+    /**
+     * Writes position to component memory.
+     */
+    public static void setPosition(MemorySegment memory, long entityBase, double x, double y, double z) {
+        memory.set(ValueLayout.JAVA_DOUBLE, entityBase + TRANSFORM_X, x);
+        memory.set(ValueLayout.JAVA_DOUBLE, entityBase + TRANSFORM_Y, y);
+        memory.set(ValueLayout.JAVA_DOUBLE, entityBase + TRANSFORM_Z, z);
+    }
 
-        private static final long ID_OFFSET = LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("mcEntityId"));
-        private static final long FLAGS_OFFSET = LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("flags"));
-        private static final long SYNC_TICK_OFFSET = LAYOUT.byteOffset(MemoryLayout.PathElement.groupElement("lastSyncTick"));
+    /**
+     * Copies current transform to previous transform.
+     */
+    public static void copyToPrevious(MemorySegment memory, long entityBase) {
+        // Copy 40 bytes (x,y,z,yaw,pitch,roll,flags) from current to previous
+        MemorySegment.copy(
+                memory, entityBase,
+                memory, entityBase + PREV_TRANSFORM_BASE,
+                40
+        );
+    }
 
-        // VarHandle for atomic flag operations
-        private static final VarHandle FLAGS = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("flags"));
+    /**
+     * Reads velocity from component memory.
+     */
+    public static void getVelocity(MemorySegment memory, long entityBase, double[] out) {
+        out[0] = memory.get(ValueLayout.JAVA_DOUBLE, entityBase + VELOCITY_X);
+        out[1] = memory.get(ValueLayout.JAVA_DOUBLE, entityBase + VELOCITY_Y);
+        out[2] = memory.get(ValueLayout.JAVA_DOUBLE, entityBase + VELOCITY_Z);
+    }
 
-        public static void initialize(MemorySegment seg, int entityId) {
-            setEntityId(seg, entityId);
-            setFlags(seg, 0);
-            setLastSyncTick(seg, 0);
-        }
+    /**
+     * Writes velocity to component memory.
+     */
+    public static void setVelocity(MemorySegment memory, long entityBase, double vx, double vy, double vz) {
+        memory.set(ValueLayout.JAVA_DOUBLE, entityBase + VELOCITY_X, vx);
+        memory.set(ValueLayout.JAVA_DOUBLE, entityBase + VELOCITY_Y, vy);
+        memory.set(ValueLayout.JAVA_DOUBLE, entityBase + VELOCITY_Z, vz);
 
-        public static int getEntityId(MemorySegment seg) { 
-            return seg.get(ValueLayout.JAVA_INT, ID_OFFSET); 
-        }
-        public static void setEntityId(MemorySegment seg, int id) { 
-            seg.set(ValueLayout.JAVA_INT, ID_OFFSET, id); 
-        }
-        
-        public static int getFlags(MemorySegment seg) { 
-            return seg.get(ValueLayout.JAVA_INT, FLAGS_OFFSET); 
-        }
-        public static void setFlags(MemorySegment seg, int flags) { 
-            seg.set(ValueLayout.JAVA_INT, FLAGS_OFFSET, flags); 
-        }
+        // Cache speed magnitude
+        float speed = (float) Math.sqrt(vx * vx + vy * vy + vz * vz);
+        memory.set(ValueLayout.JAVA_FLOAT, entityBase + VELOCITY_SPEED, speed);
+    }
 
-        public static long getLastSyncTick(MemorySegment seg) { 
-            return seg.get(ValueLayout.JAVA_LONG, SYNC_TICK_OFFSET); 
-        }
-        public static void setLastSyncTick(MemorySegment seg, long tick) { 
-            seg.set(ValueLayout.JAVA_LONG, SYNC_TICK_OFFSET, tick); 
-        }
+    /**
+     * Gets metadata flags.
+     */
+    public static long getFlags(MemorySegment memory, long entityBase) {
+        return memory.get(ValueLayout.JAVA_LONG, entityBase + META_FLAGS);
+    }
 
-        // Atomic flag operations
-        public static boolean hasFlag(MemorySegment seg, int flag) {
-            return (getFlags(seg) & flag) != 0;
-        }
+    /**
+     * Sets metadata flags (atomic OR).
+     */
+    public static void setFlags(MemorySegment memory, long entityBase, long flags) {
+        long current = memory.get(ValueLayout.JAVA_LONG, entityBase + META_FLAGS);
+        memory.set(ValueLayout.JAVA_LONG, entityBase + META_FLAGS, current | flags);
+    }
 
-        public static void setFlag(MemorySegment seg, int flag) {
-            int current, updated;
-            do {
-                current = (int) FLAGS.getVolatile(seg, 0L);
-                updated = current | flag;
-            } while (!FLAGS.compareAndSet(seg, 0L, current, updated));
-        }
+    /**
+     * Clears metadata flags (atomic AND NOT).
+     */
+    public static void clearFlags(MemorySegment memory, long entityBase, long flags) {
+        long current = memory.get(ValueLayout.JAVA_LONG, entityBase + META_FLAGS);
+        memory.set(ValueLayout.JAVA_LONG, entityBase + META_FLAGS, current & ~flags);
+    }
 
-        public static void clearFlag(MemorySegment seg, int flag) {
-            int current, updated;
-            do {
-                current = (int) FLAGS.getVolatile(seg, 0L);
-                updated = current & ~flag;
-            } while (!FLAGS.compareAndSet(seg, 0L, current, updated));
-        }
+    /**
+     * Gets and clears all dirty flags atomically.
+     */
+    public static long getAndClearDirtyFlags(MemorySegment memory, long entityBase) {
+        long current = memory.get(ValueLayout.JAVA_LONG, entityBase + META_FLAGS);
+        long dirty = current & (FLAG_TRANSFORM_DIRTY | FLAG_VELOCITY_DIRTY | FLAG_ACCEL_DIRTY);
+        memory.set(ValueLayout.JAVA_LONG, entityBase + META_FLAGS, current & ~dirty);
+        return dirty;
+    }
 
-        public static int getAndClearFlags(MemorySegment seg) {
-            return (int) FLAGS.getAndSet(seg, 0L, 0);
-        }
+    /**
+     * Checks if entity has any of the specified flags set.
+     */
+    public static boolean hasFlags(MemorySegment memory, long entityBase, long flags) {
+        return (memory.get(ValueLayout.JAVA_LONG, entityBase + META_FLAGS) & flags) != 0;
     }
 }
