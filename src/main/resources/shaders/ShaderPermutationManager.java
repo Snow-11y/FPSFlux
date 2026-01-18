@@ -1,4 +1,4 @@
-package com.example.modid.gl.vulkan.shaders;
+package com.resources.shaders;
 
 import com.example.modid.gl.GPUBackend;
 import com.example.modid.gl.GPUBackendSelector;
