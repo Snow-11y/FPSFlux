@@ -43,3 +43,36 @@ public class FPSFluxCore implements IFMLLoadingPlugin, IEarlyMixinLoader {
         return null;
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IN FPSFluxCore.java - Main mod initialization
+// ═══════════════════════════════════════════════════════════════════════════
+
+@Mod.EventHandler
+public void init(FMLInitializationEvent event) {
+    // Apply all patches automatically
+    UniversalPatcher.applyAllPatches();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IN MixinMinecraft.java - When window becomes available
+// ═══════════════════════════════════════════════════════════════════════════
+
+@Inject(method = "startGame", at = @At("TAIL"))
+private void onGameStart(CallbackInfo ci) {
+    long handle = UniversalPatcher.captureWindowHandle();
+    UniversalPatcher.applyDeferredPatches(handle);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IN ShaderPermutationManager.java - Loading shaders
+// ═══════════════════════════════════════════════════════════════════════════
+
+public void loadShaders() {
+    // OLD (broken in JAR):
+    // String source = Files.readString(Path.of("shaders/terrain.vert"));
+    
+    // NEW (works everywhere):
+    String source = UniversalPatcher.loadShader("terrain.vert");
+    byte[] spirv = UniversalPatcher.loadShaderBinary("terrain.vert.spv");
+}
