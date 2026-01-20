@@ -1,7 +1,7 @@
 package com.example.modid.gl.vulkan;
 
 import com.example.modid.gl.buffer.ops.BufferOps;
-import com.example.modid.gl.mapping.VulkanCallMapper;
+import com.example.modid.gl.mapping.VulkanCallMapperX;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -835,7 +835,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
          * vkGetPhysicalDeviceProperties2(vkPhysicalDevice, props2);
          */
         
-        VulkanCallMapper.vkGetVulkan14Features(vkPhysicalDevice, vulkan14Features);
+        VulkanCallMapperX.vkGetVulkan14Features(vkPhysicalDevice, vulkan14Features);
         
         System.out.println("[Vulkan 1.4] " + vulkan14Features);
     }
@@ -909,7 +909,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
          * vkCopyMemoryToImage(vkDevice, vkCopyInfo);
          */
         
-        VulkanCallMapper.vkCopyMemoryToImage(vkDevice, copyInfo);
+        VulkanCallMapperX.vkCopyMemoryToImage(vkDevice, copyInfo);
         
         // Calculate bytes transferred
         long bytesTransferred = 0;
@@ -956,7 +956,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
          * vkCopyImageToMemory(vkDevice, copyInfo);
          */
         
-        VulkanCallMapper.vkCopyImageToMemory(vkDevice, srcImage, srcLayout, dstMemory, width, height);
+        VulkanCallMapperX.vkCopyImageToMemory(vkDevice, srcImage, srcLayout, dstMemory, width, height);
     }
     
     /**
@@ -983,7 +983,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
          * vkTransitionImageLayout(vkDevice, 1, vkTransition);
          */
         
-        VulkanCallMapper.vkTransitionImageLayout(vkDevice, transitionInfo);
+        VulkanCallMapperX.vkTransitionImageLayout(vkDevice, transitionInfo);
     }
     
     /**
@@ -1066,7 +1066,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
          * vkCmdPushDescriptorSetKHR(commandBuffer, pipelineBindPoint, pipelineLayout, set, vkWrites);
          */
         
-        VulkanCallMapper.vkCmdPushDescriptorSet(commandBuffer, pipelineBindPoint,
+        VulkanCallMapperX.vkCmdPushDescriptorSet(commandBuffer, pipelineBindPoint,
             pipelineLayout, set, writes);
         
         STAT_PUSH_DESCRIPTOR_SETS.incrementAndGet();
@@ -1095,7 +1095,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
          * vkCmdPushDescriptorSet2KHR(commandBuffer, pushInfo);
          */
         
-        VulkanCallMapper.vkCmdPushDescriptorSet2(commandBuffer, info);
+        VulkanCallMapperX.vkCmdPushDescriptorSet2(commandBuffer, info);
         STAT_PUSH_DESCRIPTOR_SETS.incrementAndGet();
     }
     
@@ -1174,7 +1174,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
          * vkCmdSetRenderingAttachmentLocationsKHR(commandBuffer, vkLocationInfo);
          */
         
-        VulkanCallMapper.vkCmdSetRenderingAttachmentLocations(commandBuffer, locationInfo);
+        VulkanCallMapperX.vkCmdSetRenderingAttachmentLocations(commandBuffer, locationInfo);
         STAT_LOCAL_READS.incrementAndGet();
     }
     
@@ -1198,7 +1198,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
          * vkCmdSetRenderingInputAttachmentIndicesKHR(commandBuffer, vkIndexInfo);
          */
         
-        VulkanCallMapper.vkCmdSetRenderingInputAttachmentIndices(commandBuffer, indexInfo);
+        VulkanCallMapperX.vkCmdSetRenderingInputAttachmentIndices(commandBuffer, indexInfo);
     }
     
     /**
@@ -1277,7 +1277,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
          * vkCmdBindIndexBuffer(commandBuffer, buffer, offset, VK_INDEX_TYPE_UINT8);
          */
         
-        VulkanCallMapper.vkCmdBindIndexBuffer(commandBuffer, buffer, offset, VK_INDEX_TYPE_UINT8);
+        VulkanCallMapperX.vkCmdBindIndexBuffer(commandBuffer, buffer, offset, VK_INDEX_TYPE_UINT8);
     }
     
     /**
@@ -1309,7 +1309,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
             throw new UnsupportedOperationException("Line rasterization modes not supported");
         }
         
-        VulkanCallMapper.vkCmdSetLineRasterizationMode(commandBuffer, mode);
+        VulkanCallMapperX.vkCmdSetLineRasterizationMode(commandBuffer, mode);
         STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
     }
     
@@ -1322,7 +1322,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
             throw new UnsupportedOperationException("Stippled lines not supported");
         }
         
-        VulkanCallMapper.vkCmdSetLineStippleEnable(commandBuffer, enable);
+        VulkanCallMapperX.vkCmdSetLineStippleEnable(commandBuffer, enable);
         STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
     }
     
@@ -1330,7 +1330,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
      * Set line stipple pattern dynamically.
      */
     public void cmdSetLineStipple(long commandBuffer, int factor, short pattern) {
-        VulkanCallMapper.vkCmdSetLineStipple(commandBuffer, factor, pattern);
+        VulkanCallMapperX.vkCmdSetLineStipple(commandBuffer, factor, pattern);
         STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
     }
     
@@ -1405,7 +1405,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
          * vkCmdBindDescriptorSets2KHR(commandBuffer, bindInfo);
          */
         
-        VulkanCallMapper.vkCmdBindDescriptorSets2(commandBuffer, pipelineBindPoint,
+        VulkanCallMapperX.vkCmdBindDescriptorSets2(commandBuffer, pipelineBindPoint,
             layout, firstSet, descriptorSets, dynamicOffsets);
     }
     
@@ -1432,7 +1432,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
          * vkCmdPushConstants2KHR(commandBuffer, pushInfo);
          */
         
-        VulkanCallMapper.vkCmdPushConstants2(commandBuffer, layout, stageFlags, offset, values);
+        VulkanCallMapperX.vkCmdPushConstants2(commandBuffer, layout, stageFlags, offset, values);
     }
     
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -1488,7 +1488,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
          * return vkMapMemory2KHR(vkDevice, mapInfo);
          */
         
-        return VulkanCallMapper.vkMapMemoryPlaced(vkDevice, memory, offset, size, address);
+        return VulkanCallMapperX.vkMapMemoryPlaced(vkDevice, memory, offset, size, address);
     }
     
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -1808,7 +1808,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
      */
     protected long getBufferAddress(ByteBuffer buffer) {
         // In real implementation, this would use MemoryUtil.memAddress or similar
-        return VulkanCallMapper.getBufferAddress(buffer);
+        return VulkanCallMapperX.getBufferAddress(buffer);
     }
     
     /**
@@ -1817,7 +1817,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
     protected void uploadTextureData(long image, ByteBuffer data, int width, int height, int depth) {
         // Fallback implementation using staging buffer
         // This would be the Vulkan 1.3 path
-        VulkanCallMapper.uploadTextureViaStaging(vkDevice, image, data, width, height, depth);
+        VulkanCallMapperX.uploadTextureViaStaging(vkDevice, image, data, width, height, depth);
     }
     
     /**
@@ -1826,7 +1826,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
     protected void cmdBindDescriptorSets(long commandBuffer, int pipelineBindPoint,
                                           long layout, int firstSet, long[] descriptorSets,
                                           int[] dynamicOffsets) {
-        VulkanCallMapper.vkCmdBindDescriptorSets(commandBuffer, pipelineBindPoint,
+        VulkanCallMapperX.vkCmdBindDescriptorSets(commandBuffer, pipelineBindPoint,
             layout, firstSet, descriptorSets, dynamicOffsets);
     }
     
@@ -1835,7 +1835,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
      */
     protected void cmdPushConstants(long commandBuffer, long layout, int stageFlags,
                                      int offset, ByteBuffer values) {
-        VulkanCallMapper.vkCmdPushConstants(commandBuffer, layout, stageFlags, offset, values);
+        VulkanCallMapperX.vkCmdPushConstants(commandBuffer, layout, stageFlags, offset, values);
     }
     
     /**
@@ -1843,7 +1843,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
      */
     protected void cmdDrawIndexed(long commandBuffer, int indexCount, int instanceCount,
                                    int firstIndex, int vertexOffset, int firstInstance) {
-        VulkanCallMapper.vkCmdDrawIndexed(commandBuffer, indexCount, instanceCount,
+        VulkanCallMapperX.vkCmdDrawIndexed(commandBuffer, indexCount, instanceCount,
             firstIndex, vertexOffset, firstInstance);
     }
     
@@ -1851,7 +1851,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
      * Queue submit.
      */
     protected void queueSubmit(long queue, long commandBuffer, long fence) {
-        VulkanCallMapper.vkQueueSubmit(queue, commandBuffer, fence);
+        VulkanCallMapperX.vkQueueSubmit(queue, commandBuffer, fence);
     }
     
     /**
@@ -1968,12 +1968,12 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
                 firstIndex, vertexOffset, firstInstance);
         } else if (indexCount <= 65536) {
             // Use uint16
-            VulkanCallMapper.vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+            VulkanCallMapperX.vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
             cmdDrawIndexed(commandBuffer, indexCount, instanceCount, 
                 firstIndex, vertexOffset, firstInstance);
         } else {
             // Use uint32
-            VulkanCallMapper.vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+            VulkanCallMapperX.vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
             cmdDrawIndexed(commandBuffer, indexCount, instanceCount, 
                 firstIndex, vertexOffset, firstInstance);
         }
@@ -2034,7 +2034,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
          * return vkCreatePipelineLayout(vkDevice, layoutInfo);
          */
         
-        return VulkanCallMapper.vkCreatePipelineLayoutWithPushDescriptor(
+        return VulkanCallMapperX.vkCreatePipelineLayoutWithPushDescriptor(
             vkDevice, pushDescriptorSetIndices, descriptorSetLayouts);
     }
     
@@ -2078,7 +2078,7 @@ public class VulkanBufferOps14 extends VulkanBufferOps13 {
         
         createInfo.dynamicStates = dynamicStates.stream().mapToInt(i -> i).toArray();
         
-        return VulkanCallMapper.vkCreateGraphicsPipeline(vkDevice, createInfo);
+        return VulkanCallMapperX.vkCreateGraphicsPipeline(vkDevice, createInfo);
     }
     
     /**
