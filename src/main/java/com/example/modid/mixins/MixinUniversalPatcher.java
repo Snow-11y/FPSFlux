@@ -12062,7 +12062,7 @@ public static final class BatchOps {
             }
         }
         
-        //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════════════════════════════════════════════
         // CALLER IDENTIFICATION
         //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
         
@@ -12070,13 +12070,33 @@ public static final class BatchOps {
         private static final Map<String, String[]> MOD_PACKAGE_PREFIXES = new ConcurrentHashMap<>();
         
         static {
-            // Initialize known mod packages
+            // Shader Mods (Priority 1000)
             MOD_PACKAGE_PREFIXES.put("optifine", new String[]{"optifine.", "net.optifine."});
-            MOD_PACKAGE_PREFIXES.put("sodium", new String[]{"me.jellysquid.mods.sodium.", "net.caffeinemc.mods.sodium."});
-            MOD_PACKAGE_PREFIXES.put("iris", new String[]{"net.irisshaders.", "net.coderbot.iris."});
-            MOD_PACKAGE_PREFIXES.put("rubidium", new String[]{"me.jellysquid.mods.sodium."});
-            MOD_PACKAGE_PREFIXES.put("embeddium", new String[]{"org.embeddedt.embeddium."});
+            MOD_PACKAGE_PREFIXES.put("oculus", new String[]{"net.coderbot.iris.", "net.irisshaders."});
+            
+            // Polyglot/ECS Engines (Priority 850-1125)
+            MOD_PACKAGE_PREFIXES.put("snowium", new String[]{"com.example.modid", "snowium.", "dev.snowium."});
+            MOD_PACKAGE_PREFIXES.put("kirino", new String[]{"com.cleanroommc.kirino."});
+            
+            // Sodium-based Renderers (Priority 750)
+            MOD_PACKAGE_PREFIXES.put("neonium", new String[]{"me.jellysquid.mods.sodium.", "neonium.", "net.caffeinemc.mods.sodium."});
+            MOD_PACKAGE_PREFIXES.put("relictium", new String[]{"relictium.", "me.jellysquid.mods.sodium."});
+            MOD_PACKAGE_PREFIXES.put("vintagium", new String[]{"vintagium.", "me.jellysquid.mods.sodium."});
+            
+            // Embeddium-based Renderers (Priority 750)
+            MOD_PACKAGE_PREFIXES.put("celeritas", new String[]{"org.embeddedt.embeddium.", "net.celeritas."});
+            
+            // Traditional Chunk Renderers (Priority 700)
             MOD_PACKAGE_PREFIXES.put("nothirium", new String[]{"meldexun.nothirium."});
+            
+            // Entity/Culling Renderers (Priority 600-650)
+            MOD_PACKAGE_PREFIXES.put("entity_culling", new String[]{"dev.tr7zw.entityculling."});
+            MOD_PACKAGE_PREFIXES.put("better_foliage", new String[]{"mods.betterfoliage."});
+            
+            // Lighting/Effect Mods (Priority 500)
+            MOD_PACKAGE_PREFIXES.put("dynamic_lights", new String[]{"atomicstryker.dynamiclights."});
+            
+            // Core packages
             MOD_PACKAGE_PREFIXES.put("minecraft", new String[]{"net.minecraft.", "com.mojang."});
             MOD_PACKAGE_PREFIXES.put("fpsflux", new String[]{"com.example.modid."});
         }
@@ -12175,19 +12195,41 @@ public static final class BatchOps {
             return "unknown";
         }
         
-        /**
+/**
          * Get display name for a mod ID.
          */
         private static String getModName(String modId) {
             return switch (modId) {
+                // Shader Mods (Priority 1000)
                 case "optifine" -> "OptiFine";
-                case "sodium" -> "Sodium";
-                case "iris" -> "Iris Shaders";
-                case "rubidium" -> "Rubidium";
-                case "embeddium" -> "Embeddium";
+                case "oculus" -> "Oculus (1.12.2)";
+                
+                // Polyglot/ECS Engines (Priority 850-1125)
+                case "snowium" -> "Snowium";
+                case "kirino" -> "Kirino";
+                
+                // Sodium-based Renderers (Priority 750)
+                case "neonium" -> "Neonium";
+                case "relictium" -> "Relictium";
+                case "vintagium" -> "Vintagium";
+                
+                // Embeddium-based Renderers (Priority 750)
+                case "celeritas" -> "Celeritas";
+                
+                // Traditional Chunk Renderers (Priority 700)
                 case "nothirium" -> "Nothirium";
+                
+                // Entity/Culling Renderers (Priority 600-650)
+                case "entity_culling" -> "Entity Culling";
+                case "better_foliage" -> "Better Foliage";
+                
+                // Lighting/Effect Mods (Priority 500)
+                case "dynamic_lights" -> "Dynamic Lights";
+                
+                // Core
                 case "minecraft" -> "Minecraft";
                 case "fpsflux" -> "FPSFlux";
+                
                 default -> modId;
             };
         }
@@ -13119,223 +13161,622 @@ public static final class BatchOps {
             }
         }
         
-        //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
-        // OPTIFINE HANDLER
-        //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+//═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // SHADER MOD HANDLERS (Priority 1000)
+    //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Handler for OptiFine - The classic Minecraft optimization and shader mod.
+     * Priority 1000 (Highest) - Takes full control when shaders are active.
+     */
+    static final class OptiFineHandler extends BaseModHandler {
+        private volatile boolean shaderPackLoaded = false;
+        private volatile boolean renderingWorld = false;
         
-        static final class OptiFineHandler extends BaseModHandler {
-            private volatile boolean shadersActive = false;
-            private volatile boolean fastRenderEnabled = false;
-            private volatile int shaderPack = 0;
+        OptiFineHandler() {
+            super("optifine", "OptiFine", 1000);
+        }
+        
+        @Override
+        public void onModDetected() {
+            super.onModDetected();
             
-            OptiFineHandler() {
-                super("optifine", "OptiFine", 1000);
-            }
-            
-            @Override
-            public void onModDetected() {
-                super.onModDetected();
-                
-                // Try to detect OptiFine configuration
-                try {
-                    Class<?> configClass = Class.forName("Config");
-                    // Read OptiFine settings via reflection
-                    // shadersActive = ...
-                } catch (Throwable ignored) {}
-            }
-            
-            @Override
-            public boolean preOperation(Operation op, OperationContext ctx) {
-                // OptiFine handles shader-related state changes itself
-                if (shadersActive && isShaderRelatedOperation(op)) {
-                    recordHandled();
-                    return true; // Let OptiFine handle it
-                }
-                
-                // Handle FastRender mode
-                if (fastRenderEnabled && op.getCategory() == Operation.Category.MATRIX) {
-                    // FastRender modifies matrix handling
-                    recordHandled();
-                    return true;
-                }
-                
-                recordPassed();
-                return false;
-            }
-            
-            @Override
-            public void postOperation(Operation op, OperationContext ctx) {
-                // Track state changes OptiFine makes
-            }
-            
-            @Override
-            public void onFrameStart(long frameNumber) {
-                // Detect if shaders are active this frame
-                try {
-                    Class<?> shadersClass = Class.forName("net.optifine.shaders.Shaders");
-                    // Check shader state
-                } catch (Throwable ignored) {}
-            }
-            
-            private boolean isShaderRelatedOperation(Operation op) {
-                return op.getCategory() == Operation.Category.SHADER ||
-                       op.getCategory() == Operation.Category.FRAMEBUFFER ||
-                       op == Operation.DEPTH_MASK ||
-                       op == Operation.COLOR_MASK;
-            }
-            
-            void setShadersActive(boolean active) {
-                this.shadersActive = active;
-            }
-            
-            boolean isShadersActive() {
-                return shadersActive;
+            // Check if OptiFine has shaders enabled
+            try {
+                Class<?> shadersClass = Class.forName("optifine.shaders.Shaders");
+                java.lang.reflect.Field enabledField = shadersClass.getDeclaredField("shaderPackLoaded");
+                enabledField.setAccessible(true);
+                shaderPackLoaded = enabledField.getBoolean(null);
+            } catch (Throwable ignored) {
+                // OptiFine not present or no shaders
             }
         }
         
-        //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
-        // SODIUM/RUBIDIUM/EMBEDDIUM HANDLER
-        //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
-        
-        static final class SodiumHandler extends BaseModHandler {
-            private volatile boolean chunkRenderingActive = false;
-            
-            SodiumHandler() {
-                super("sodium", "Sodium/Rubidium/Embeddium", 850);
-            }
-            
-            @Override
-            public void onModDetected() {
-                super.onModDetected();
-                
-                // Sodium uses its own VAO/VBO management
-                // We need to be careful not to interfere
-            }
-            
-            @Override
-            public boolean preOperation(Operation op, OperationContext ctx) {
-                // During chunk rendering, Sodium manages buffer state
-                if (chunkRenderingActive && isBufferOperation(op)) {
+        @Override
+        public boolean preOperation(Operation op, OperationContext ctx) {
+            // When shader pack is loaded, OptiFine manages nearly everything
+            if (shaderPackLoaded) {
+                // OptiFine handles all shader/framebuffer operations
+                if (isOptiFineManaged(op)) {
                     recordHandled();
                     return true;
                 }
                 
-                // Sodium manages vertex array state
-                if (op == Operation.BIND_VERTEX_ARRAY || 
-                    op == Operation.ENABLE_VERTEX_ATTRIB_ARRAY ||
-                    op == Operation.DISABLE_VERTEX_ATTRIB_ARRAY) {
+                // During world rendering, defer most GL state to OptiFine
+                if (renderingWorld && isRenderStateOperation(op)) {
+                    recordHandled();
+                    return true;
+                }
+            }
+            
+            recordPassed();
+            return false;
+        }
+        
+        @Override
+        public void postOperation(Operation op, OperationContext ctx) {
+            // Sync state cache after OptiFine's direct GL calls
+            if (shaderPackLoaded && op.getCategory() == Operation.Category.STATE) {
+                // Flag state as potentially dirty
+            }
+        }
+        
+        private boolean isOptiFineManaged(Operation op) {
+            return op.getCategory() == Operation.Category.SHADER ||
+                   op.getCategory() == Operation.Category.FRAMEBUFFER ||
+                   op == Operation.BLEND_FUNC_SEPARATE ||
+                   op == Operation.DEPTH_MASK ||
+                   op == Operation.DEPTH_FUNC;
+        }
+        
+        private boolean isRenderStateOperation(Operation op) {
+            return op.getCategory() == Operation.Category.STATE ||
+                   op.getCategory() == Operation.Category.BLEND ||
+                   op.getCategory() == Operation.Category.DEPTH;
+        }
+        
+        void setRenderingWorld(boolean rendering) {
+            this.renderingWorld = rendering;
+        }
+    }
+    
+    /**
+     * Handler for Oculus - Iris shader backport to 1.12.2.
+     * Priority 1000 - Full shader pipeline control.
+     */
+    static final class OculusHandler extends BaseModHandler {
+        private volatile boolean shaderPackLoaded = false;
+        private volatile boolean renderingShadows = false;
+        
+        OculusHandler() {
+            super("oculus", "Oculus (1.12.2)", 1000);
+        }
+        
+        @Override
+        public void onModDetected() {
+            super.onModDetected();
+            
+            // Check if Oculus has a shader pack loaded
+            try {
+                Class<?> irisApi = Class.forName("net.coderbot.iris.Iris");
+                // Detect shader pack loaded state
+            } catch (Throwable ignored) {}
+        }
+        
+        @Override
+        public boolean preOperation(Operation op, OperationContext ctx) {
+            // When shader pack is loaded, Oculus manages most state
+            if (shaderPackLoaded) {
+                // Let Oculus handle shader-related operations
+                if (isOculusManaged(op)) {
                     recordHandled();
                     return true;
                 }
                 
-                recordPassed();
-                return false;
+                // During shadow pass, Oculus has full control
+                if (renderingShadows) {
+                    recordHandled();
+                    return true;
+                }
             }
             
-            @Override
-            public void postOperation(Operation op, OperationContext ctx) {
-                // Track Sodium's state changes
-            }
-            
-            private boolean isBufferOperation(Operation op) {
-                return op.getCategory() == Operation.Category.BUFFER ||
-                       op == Operation.BIND_VERTEX_ARRAY ||
-                       op == Operation.VERTEX_ATTRIB_POINTER;
-            }
-            
-            void setChunkRenderingActive(boolean active) {
-                this.chunkRenderingActive = active;
-            }
+            recordPassed();
+            return false;
         }
         
-        //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
-        // IRIS/OCULUS HANDLER
-        //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+        @Override
+        public void postOperation(Operation op, OperationContext ctx) {
+            // Track Oculus state changes
+        }
         
-        static final class IrisHandler extends BaseModHandler {
-            private volatile boolean shaderPackLoaded = false;
-            private volatile boolean renderingShadows = false;
+        private boolean isOculusManaged(Operation op) {
+            return op.getCategory() == Operation.Category.SHADER ||
+                   op.getCategory() == Operation.Category.FRAMEBUFFER ||
+                   op == Operation.DEPTH_MASK ||
+                   op == Operation.DEPTH_FUNC ||
+                   op == Operation.BLEND_FUNC_SEPARATE;
+        }
+        
+        void setRenderingShadows(boolean rendering) {
+            this.renderingShadows = rendering;
+        }
+    }
+    
+    //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // POLYGLOT/ECS ENGINE HANDLERS (Priority 850-1125)
+    //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Handler for Snowium - Universal Polyglot Engine with multi-backend support.
+     * Priority 1125 (Flagship) - Complete architectural rewrite.
+     */
+    static final class SnowiumHandler extends BaseModHandler {
+        private volatile boolean vulkanBackendActive = false;
+        private volatile boolean modernGLActive = false;
+        
+        SnowiumHandler() {
+            super("snowium", "Snowium", 1125);
+        }
+        
+        @Override
+        public void onModDetected() {
+            super.onModDetected();
             
-            IrisHandler() {
-                super("iris", "Iris/Oculus", 1000);
-            }
-            
-            @Override
-            public void onModDetected() {
-                super.onModDetected();
-                
-                // Check if Iris has a shader pack loaded
+            // Detect which backend Snowium is using
+            try {
+                // Check for Vulkan backend
+                Class<?> backendClass = Class.forName("com.example.modid.backend.VulkanBackend");
+                vulkanBackendActive = true;
+            } catch (Throwable e) {
+                // Try OpenGL backend
                 try {
-                    Class<?> irisApi = Class.forName("net.irisshaders.iris.api.v0.IrisApi");
-                    // shaderPackLoaded = ...
+                    Class<?> glBackend = Class.forName("com.example.modid.backend.OpenGLBackend");
+                    modernGLActive = true;
                 } catch (Throwable ignored) {}
             }
-            
-            @Override
-            public boolean preOperation(Operation op, OperationContext ctx) {
-                // When shader pack is loaded, Iris manages most state
-                if (shaderPackLoaded) {
-                    // Let Iris handle shader-related operations
-                    if (isIrisManagedOperation(op)) {
-                        recordHandled();
-                        return true;
-                    }
-                    
-                    // During shadow pass, let Iris have full control
-                    if (renderingShadows) {
-                        recordHandled();
-                        return true;
-                    }
-                }
-                
-                recordPassed();
-                return false;
-            }
-            
-            @Override
-            public void postOperation(Operation op, OperationContext ctx) {
-                // Track Iris state changes
-            }
-            
-            private boolean isIrisManagedOperation(Operation op) {
-                return op.getCategory() == Operation.Category.SHADER ||
-                       op.getCategory() == Operation.Category.FRAMEBUFFER ||
-                       op == Operation.DEPTH_MASK ||
-                       op == Operation.DEPTH_FUNC ||
-                       op == Operation.BLEND_FUNC_SEPARATE;
-            }
-            
-            void setRenderingShadows(boolean rendering) {
-                this.renderingShadows = rendering;
-            }
         }
         
-        //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
-        // NOTHIRIUM HANDLER
-        //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
-        
-        static final class NothiriumHandler extends BaseModHandler {
-            
-            NothiriumHandler() {
-                super("nothirium", "Nothirium", 750);
+        @Override
+        public boolean preOperation(Operation op, OperationContext ctx) {
+            // Snowium uses universal patcher for legacy GL calls
+            // When Vulkan backend is active, intercept ALL GL operations
+            if (vulkanBackendActive) {
+                // Snowium's GL-to-Vulkan translation layer handles everything
+                recordHandled();
+                return true;
             }
             
-            @Override
-            public boolean preOperation(Operation op, OperationContext ctx) {
-                // Nothirium replaces chunk rendering with VBO-based rendering
-                // It uses legacy vertex arrays (glVertexPointer, etc.)
-                
-                // We generally don't interfere with Nothirium
-                recordPassed();
-                return false;
+            // Modern GL backend manages its own state explicitly
+            if (modernGLActive && isSnowiumManaged(op)) {
+                recordHandled();
+                return true;
             }
             
-            @Override
-            public void postOperation(Operation op, OperationContext ctx) {
-                // No special post-processing needed
-            }
+            recordPassed();
+            return false;
         }
         
+        @Override
+        public void postOperation(Operation op, OperationContext ctx) {
+            // Snowium maintains its own state tracking
+        }
+        
+        private boolean isSnowiumManaged(Operation op) {
+            // Snowium manages chunk rendering, entity rendering, and shader pipeline
+            return op.getCategory() == Operation.Category.BUFFER ||
+                   op.getCategory() == Operation.Category.SHADER ||
+                   op == Operation.DRAW_ARRAYS ||
+                   op == Operation.DRAW_ELEMENTS;
+        }
+    }
+    
+    /**
+     * Handler for Kirino - ECS-based Data-Oriented Rendering Engine.
+     * Priority 850 - Explicit modern OpenGL, GPU-driven techniques.
+     */
+    static final class KirinoHandler extends BaseModHandler {
+        private volatile boolean renderPassActive = false;
+        
+        KirinoHandler() {
+            super("kirino", "Kirino", 850);
+        }
+        
+        @Override
+        public void onModDetected() {
+            super.onModDetected();
+            
+            // Kirino uses explicit resource management
+            // No automatic detection needed
+        }
+        
+        @Override
+        public boolean preOperation(Operation op, OperationContext ctx) {
+            // During active render pass, Kirino manages all state
+            if (renderPassActive) {
+                recordHandled();
+                return true;
+            }
+            
+            // Kirino manages modern GL operations explicitly
+            if (isKirinoManaged(op)) {
+                recordHandled();
+                return true;
+            }
+            
+            recordPassed();
+            return false;
+        }
+        
+        @Override
+        public void postOperation(Operation op, OperationContext ctx) {
+            // Track render pass boundaries
+        }
+        
+        private boolean isKirinoManaged(Operation op) {
+            // Kirino handles buffer management, shaders, and draw calls
+            return op.getCategory() == Operation.Category.BUFFER ||
+                   op.getCategory() == Operation.Category.SHADER ||
+                   op == Operation.BIND_VERTEX_ARRAY ||
+                   op == Operation.DRAW_ARRAYS ||
+                   op == Operation.DRAW_ELEMENTS;
+        }
+        
+        void setRenderPassActive(boolean active) {
+            this.renderPassActive = active;
+        }
+    }
+    
+    //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // SODIUM-BASED RENDERER HANDLERS (Priority 750)
+    //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Handler for Neonium - Newest Vintagium/Sodium fork for 1.12.2.
+     * Priority 750 - Modern chunk rendering with aggressive culling.
+     */
+    static final class NeoniumHandler extends BaseModHandler {
+        private volatile boolean chunkRenderingActive = false;
+        
+        NeoniumHandler() {
+            super("neonium", "Neonium", 750);
+        }
+        
+        @Override
+        public void onModDetected() {
+            super.onModDetected();
+            
+            // Neonium uses its own VAO/VBO management
+        }
+        
+        @Override
+        public boolean preOperation(Operation op, OperationContext ctx) {
+            // During chunk rendering, Neonium manages buffer state
+            if (chunkRenderingActive && isBufferOperation(op)) {
+                recordHandled();
+                return true;
+            }
+            
+            // Neonium manages vertex array state
+            if (op == Operation.BIND_VERTEX_ARRAY || 
+                op == Operation.ENABLE_VERTEX_ATTRIB_ARRAY ||
+                op == Operation.DISABLE_VERTEX_ATTRIB_ARRAY) {
+                recordHandled();
+                return true;
+            }
+            
+            recordPassed();
+            return false;
+        }
+        
+        @Override
+        public void postOperation(Operation op, OperationContext ctx) {
+            // Track Neonium's state changes
+        }
+        
+        private boolean isBufferOperation(Operation op) {
+            return op.getCategory() == Operation.Category.BUFFER ||
+                   op == Operation.BIND_VERTEX_ARRAY ||
+                   op == Operation.VERTEX_ATTRIB_POINTER;
+        }
+        
+        void setChunkRenderingActive(boolean active) {
+            this.chunkRenderingActive = active;
+        }
+    }
+    
+    /**
+     * Handler for Relictium - Unofficial Vintagium fork with performance improvements.
+     * Priority 750 - Same architecture as Neonium/Vintagium.
+     */
+    static final class RelictiumHandler extends BaseModHandler {
+        private volatile boolean chunkRenderingActive = false;
+        
+        RelictiumHandler() {
+            super("relictium", "Relictium", 750);
+        }
+        
+        @Override
+        public boolean preOperation(Operation op, OperationContext ctx) {
+            // Same handling as Neonium - Sodium-based architecture
+            if (chunkRenderingActive && isBufferOperation(op)) {
+                recordHandled();
+                return true;
+            }
+            
+            if (op == Operation.BIND_VERTEX_ARRAY || 
+                op == Operation.ENABLE_VERTEX_ATTRIB_ARRAY ||
+                op == Operation.DISABLE_VERTEX_ATTRIB_ARRAY) {
+                recordHandled();
+                return true;
+            }
+            
+            recordPassed();
+            return false;
+        }
+        
+        @Override
+        public void postOperation(Operation op, OperationContext ctx) {
+            // Track state changes
+        }
+        
+        private boolean isBufferOperation(Operation op) {
+            return op.getCategory() == Operation.Category.BUFFER ||
+                   op == Operation.BIND_VERTEX_ARRAY ||
+                   op == Operation.VERTEX_ATTRIB_POINTER;
+        }
+        
+        void setChunkRenderingActive(boolean active) {
+            this.chunkRenderingActive = active;
+        }
+    }
+    
+    /**
+     * Handler for Vintagium - Original Sodium port to 1.12.2 by Asek3.
+     * Priority 750 - Foundation for Neonium and Relictium.
+     */
+    static final class VintagiumHandler extends BaseModHandler {
+        private volatile boolean chunkRenderingActive = false;
+        
+        VintagiumHandler() {
+            super("vintagium", "Vintagium", 750);
+        }
+        
+        @Override
+        public boolean preOperation(Operation op, OperationContext ctx) {
+            // Same handling as other Sodium-based mods
+            if (chunkRenderingActive && isBufferOperation(op)) {
+                recordHandled();
+                return true;
+            }
+            
+            if (op == Operation.BIND_VERTEX_ARRAY || 
+                op == Operation.ENABLE_VERTEX_ATTRIB_ARRAY ||
+                op == Operation.DISABLE_VERTEX_ATTRIB_ARRAY) {
+                recordHandled();
+                return true;
+            }
+            
+            recordPassed();
+            return false;
+        }
+        
+        @Override
+        public void postOperation(Operation op, OperationContext ctx) {
+            // Track state changes
+        }
+        
+        private boolean isBufferOperation(Operation op) {
+            return op.getCategory() == Operation.Category.BUFFER ||
+                   op == Operation.BIND_VERTEX_ARRAY ||
+                   op == Operation.VERTEX_ATTRIB_POINTER;
+        }
+        
+        void setChunkRenderingActive(boolean active) {
+            this.chunkRenderingActive = active;
+        }
+    }
+    
+    //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // EMBEDDIUM-BASED RENDERER HANDLERS (Priority 750)
+    //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Handler for Celeritas - Embeddium + Oculus 1.7 shader support.
+     * Priority 750 - LGPL-3.0 Sodium fork with integrated shaders.
+     */
+    static final class CeleritasHandler extends BaseModHandler {
+        private volatile boolean chunkRenderingActive = false;
+        private volatile boolean shaderPackLoaded = false;
+        
+        CeleritasHandler() {
+            super("celeritas", "Celeritas", 750);
+        }
+        
+        @Override
+        public void onModDetected() {
+            super.onModDetected();
+            
+            // Check for Oculus shader pack
+            try {
+                Class<?> irisApi = Class.forName("net.coderbot.iris.Iris");
+                // Detect shader state
+            } catch (Throwable ignored) {}
+        }
+        
+        @Override
+        public boolean preOperation(Operation op, OperationContext ctx) {
+            // If shaders are active, defer shader operations to Oculus layer
+            if (shaderPackLoaded && isShaderOperation(op)) {
+                recordHandled();
+                return true;
+            }
+            
+            // Chunk rendering uses Embeddium path
+            if (chunkRenderingActive && isBufferOperation(op)) {
+                recordHandled();
+                return true;
+            }
+            
+            if (op == Operation.BIND_VERTEX_ARRAY || 
+                op == Operation.ENABLE_VERTEX_ATTRIB_ARRAY ||
+                op == Operation.DISABLE_VERTEX_ATTRIB_ARRAY) {
+                recordHandled();
+                return true;
+            }
+            
+            recordPassed();
+            return false;
+        }
+        
+        @Override
+        public void postOperation(Operation op, OperationContext ctx) {
+            // Track state changes
+        }
+        
+        private boolean isBufferOperation(Operation op) {
+            return op.getCategory() == Operation.Category.BUFFER ||
+                   op == Operation.BIND_VERTEX_ARRAY ||
+                   op == Operation.VERTEX_ATTRIB_POINTER;
+        }
+        
+        private boolean isShaderOperation(Operation op) {
+            return op.getCategory() == Operation.Category.SHADER ||
+                   op.getCategory() == Operation.Category.FRAMEBUFFER;
+        }
+        
+        void setChunkRenderingActive(boolean active) {
+            this.chunkRenderingActive = active;
+        }
+    }
+    
+    //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // TRADITIONAL CHUNK RENDERER HANDLERS (Priority 700)
+    //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Handler for Nothirium - Vertex array based chunk rendering.
+     * Priority 700 - Uses legacy vertex arrays instead of display lists.
+     */
+    static final class NothiriumHandler extends BaseModHandler {
+        private volatile boolean chunkRenderingActive = false;
+        
+        NothiriumHandler() {
+            super("nothirium", "Nothirium", 700);
+        }
+        
+        @Override
+        public boolean preOperation(Operation op, OperationContext ctx) {
+            // Nothirium replaces chunk rendering with VBO-based rendering
+            // It uses legacy vertex arrays (glVertexPointer, etc.)
+            
+            if (chunkRenderingActive && isVertexArrayOperation(op)) {
+                recordHandled();
+                return true;
+            }
+            
+            recordPassed();
+            return false;
+        }
+        
+        @Override
+        public void postOperation(Operation op, OperationContext ctx) {
+            // Sync vertex array bindings after Nothirium operations
+        }
+        
+        private boolean isVertexArrayOperation(Operation op) {
+            return op == Operation.ENABLE_CLIENT_STATE ||
+                   op == Operation.DISABLE_CLIENT_STATE ||
+                   op == Operation.VERTEX_POINTER ||
+                   op == Operation.COLOR_POINTER ||
+                   op == Operation.TEX_COORD_POINTER ||
+                   op == Operation.NORMAL_POINTER;
+        }
+        
+        void setChunkRenderingActive(boolean active) {
+            this.chunkRenderingActive = active;
+        }
+    }
+    
+    //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // ENTITY/CULLING RENDERER HANDLERS (Priority 600-650)
+    //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Handler for Entity Culling - Asynchronous occlusion culling for entities.
+     * Priority 650 - Non-intrusive, works alongside other mods.
+     */
+    static final class EntityCullingHandler extends BaseModHandler {
+        
+        EntityCullingHandler() {
+            super("entity_culling", "Entity Culling", 650);
+        }
+        
+        @Override
+        public boolean preOperation(Operation op, OperationContext ctx) {
+            // Entity Culling doesn't modify GL state, just skips renders
+            // No interception needed
+            recordPassed();
+            return false;
+        }
+        
+        @Override
+        public void postOperation(Operation op, OperationContext ctx) {
+            // No post-processing needed
+        }
+    }
+    
+    /**
+     * Handler for Better Foliage - Enhanced grass, leaves, and plant rendering.
+     * Priority 600 - Modifies block rendering with extra geometry.
+     */
+    static final class BetterFoliageHandler extends BaseModHandler {
+        
+        BetterFoliageHandler() {
+            super("better_foliage", "Better Foliage", 600);
+        }
+        
+        @Override
+        public boolean preOperation(Operation op, OperationContext ctx) {
+            // Better Foliage adds geometry but uses vanilla GL state
+            // No special handling needed
+            recordPassed();
+            return false;
+        }
+        
+        @Override
+        public void postOperation(Operation op, OperationContext ctx) {
+            // Sync state after foliage rendering if needed
+        }
+    }
+    
+    //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // LIGHTING/EFFECT MOD HANDLERS (Priority 500)
+    //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+    
+    /**
+     * Handler for Dynamic Lights - Handheld items emit light.
+     * Priority 500 - Modifies lighting calculations, not core rendering.
+     */
+    static final class DynamicLightsHandler extends BaseModHandler {
+        
+        DynamicLightsHandler() {
+            super("dynamic_lights", "Dynamic Lights", 500);
+        }
+        
+        @Override
+        public boolean preOperation(Operation op, OperationContext ctx) {
+            // Dynamic Lights modifies light values, not GL state
+            // No interception needed
+            recordPassed();
+            return false;
+        }
+        
+        @Override
+        public void postOperation(Operation op, OperationContext ctx) {
+            // No post-processing needed
+        }
+    }
+
         //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
         // HANDLER REGISTRY
         //═══════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -13346,11 +13787,33 @@ public static final class BatchOps {
         /** Sorted handler list (by priority, descending) */
         private static volatile ModHandler[] sortedHandlers = new ModHandler[0];
         
-        /** Singleton instances of built-in handlers */
+/** Singleton instances of built-in handlers - organized by priority tier */
+        
+        // Shader Mods (Priority 1000)
         private static final OptiFineHandler optiFineHandler = new OptiFineHandler();
-        private static final SodiumHandler sodiumHandler = new SodiumHandler();
-        private static final IrisHandler irisHandler = new IrisHandler();
+        private static final OculusHandler oculusHandler = new OculusHandler();
+        
+        // Polyglot/ECS Engines (Priority 850-1125)
+        private static final SnowiumHandler snowiumHandler = new SnowiumHandler();
+        private static final KirinoHandler kirinoHandler = new KirinoHandler();
+        
+        // Sodium-based Renderers (Priority 750)
+        private static final NeoniumHandler neoniumHandler = new NeoniumHandler();
+        private static final RelictiumHandler relictiumHandler = new RelictiumHandler();
+        private static final VintagiumHandler vintagiumHandler = new VintagiumHandler();
+        
+        // Embeddium-based Renderers (Priority 750)
+        private static final CeleritasHandler celeritasHandler = new CeleritasHandler();
+        
+        // Traditional Chunk Renderers (Priority 700)
         private static final NothiriumHandler nothiriumHandler = new NothiriumHandler();
+        
+        // Entity/Culling Renderers (Priority 600-650)
+        private static final EntityCullingHandler entityCullingHandler = new EntityCullingHandler();
+        private static final BetterFoliageHandler betterFoliageHandler = new BetterFoliageHandler();
+        
+        // Lighting/Effect Mods (Priority 500)
+        private static final DynamicLightsHandler dynamicLightsHandler = new DynamicLightsHandler();
         
         /**
          * Initialize mod-specific handlers.
@@ -26268,7 +26731,7 @@ static final class CompatibilityLayer {
         }
     }
     
-    //══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+//══════════════════════════════════════════════════════════════════════════════════════════════════════════════
     // SECTION 52.4 — MOD SIGNATURE DATABASE
     //══════════════════════════════════════════════════════════════════════════════════════════════════════════════
     
@@ -26328,26 +26791,11 @@ static final class CompatibilityLayer {
                 "shadeModel", "glLight", "glLightModel"
             },
             1000, true, true,
-            new String[]{"iris", "oculus"} // Known incompatible
+            new String[]{"iris", "oculus"}
         ),
         
         new ModSignature(
-            "iris", "Iris Shaders",
-            new String[]{"net.irisshaders.", "net.coderbot.iris."},
-            new String[]{"mixins.iris.json", "iris.mixins.json"},
-            new String[]{
-                "enableBlend", "disableBlend", "blendFunc", "blendFuncSeparate",
-                "enableDepthTest", "disableDepthTest", "depthFunc", "depthMask",
-                "setShaderColor", "clearColor", "colorMask",
-                "setShader", "setShaderTexture",
-                "applyModelViewMatrix", "setProjectionMatrix"
-            },
-            1000, true, true,
-            new String[]{"optifine"}
-        ),
-        
-        new ModSignature(
-            "oculus", "Oculus",
+            "oculus", "Oculus (1.12.2)",
             new String[]{"net.coderbot.iris.", "net.irisshaders."},
             new String[]{"mixins.oculus.json", "oculus.mixins.json"},
             new String[]{
@@ -26360,70 +26808,86 @@ static final class CompatibilityLayer {
         ),
         
         // ════════════════════════════════════════════════════════════════════════════════════════════
-        // CHUNK RENDERING MODS (Priority 850) - Major chunk renderer replacements
+        // POLYGLOT/ECS ENGINES (Priority 850-1125) - Complete architectural rewrites
         // ════════════════════════════════════════════════════════════════════════════════════════════
         
         new ModSignature(
-            "sodium", "Sodium",
-            new String[]{"me.jellysquid.mods.sodium.", "net.caffeinemc.mods.sodium."},
-            new String[]{"sodium.mixins.json", "mixins.sodium.json"},
+            "snowium", "Snowium",
+            new String[]{"com.example.modid", "snowium.", "dev.snowium."},
+            new String[]{"snowium.mixins.json"},
+            new String[]{}, // Uses @Inject pattern, not @Overwrite
+            1125, false, true,
+            new String[]{} // Universal compatibility, conflicts only with nothirium/kirino
+        ),
+        
+        new ModSignature(
+            "kirino", "Kirino",
+            new String[]{"com.cleanroommc.kirino."},
+            new String[]{"kirino.mixins.json"},
+            new String[]{}, // Uses @Inject pattern
+            850, false, true,
+            new String[]{"optifine", "nothirium", "neonium", "vintagium", "relictium"}
+        ),
+        
+        // ════════════════════════════════════════════════════════════════════════════════════════════
+        // SODIUM-BASED RENDERERS (Priority 750) - Modern chunk rendering
+        // ════════════════════════════════════════════════════════════════════════════════════════════
+        
+        new ModSignature(
+            "neonium", "Neonium",
+            new String[]{"me.jellysquid.mods.sodium.", "neonium.", "net.caffeinemc.mods.sodium."},
+            new String[]{"sodium.mixins.json", "mixins.sodium.json", "neonium.mixins.json"},
             new String[]{
                 "enableVertexAttribArray", "disableVertexAttribArray",
                 "vertexAttribPointer", "bindBuffer", "bufferData",
                 "drawArrays", "drawElements"
             },
-            850, true, true,
-            new String[]{}
+            750, true, true,
+            new String[]{"optifine", "nothirium", "cleanroom"}
         ),
         
         new ModSignature(
-            "rubidium", "Rubidium",
-            new String[]{"me.jellysquid.mods.sodium.", "me.jellysquid.mods.rubidium."},
-            new String[]{"rubidium.mixins.json", "mixins.rubidium.json"},
+            "relictium", "Relictium",
+            new String[]{"relictium.", "me.jellysquid.mods.sodium."},
+            new String[]{"relictium.mixins.json", "mixins.relictium.json", "sodium.mixins.json"},
             new String[]{
                 "enableVertexAttribArray", "disableVertexAttribArray",
                 "vertexAttribPointer", "bindBuffer", "bufferData"
             },
-            850, true, true,
-            new String[]{}
+            750, true, true,
+            new String[]{"optifine", "nothirium"}
         ),
         
         new ModSignature(
-            "embeddium", "Embeddium",
-            new String[]{"org.embeddedt.embeddium.", "me.jellysquid.mods.sodium."},
-            new String[]{"embeddium.mixins.json", "mixins.embeddium.json"},
+            "vintagium", "Vintagium",
+            new String[]{"vintagium.", "me.jellysquid.mods.sodium."},
+            new String[]{"vintagium.mixins.json", "mixins.vintagium.json", "sodium.mixins.json"},
             new String[]{
                 "enableVertexAttribArray", "disableVertexAttribArray",
                 "vertexAttribPointer", "bindBuffer", "bufferData"
             },
-            850, true, true,
-            new String[]{}
+            750, true, true,
+            new String[]{"optifine", "nothirium"}
         ),
         
         // ════════════════════════════════════════════════════════════════════════════════════════════
-        // ECS/RENDERING ENGINES (Priority 850) - Alternative rendering pipelines
+        // EMBEDDIUM-BASED RENDERERS (Priority 750)
         // ════════════════════════════════════════════════════════════════════════════════════════════
         
         new ModSignature(
-            "kirino", "Kirino",
-            new String[]{"kirino.", "dev.kirino."},
-            new String[]{"kirino.mixins.json"},
-            new String[]{}, // Kirino uses @Inject, not @Overwrite
-            850, false, true,
-            new String[]{}
-        ),
-        
-        new ModSignature(
-            "snowium", "Snowium",
-            new String[]{"snowium.", "dev.snowium."},
-            new String[]{"snowium.mixins.json"},
-            new String[]{},
-            800, false, true,
-            new String[]{}
+            "celeritas", "Celeritas",
+            new String[]{"org.embeddedt.embeddium.", "net.celeritas."},
+            new String[]{"embeddium.mixins.json", "mixins.embeddium.json", "celeritas.mixins.json"},
+            new String[]{
+                "enableVertexAttribArray", "disableVertexAttribArray",
+                "vertexAttribPointer", "bindBuffer", "bufferData"
+            },
+            750, true, true,
+            new String[]{"optifine", "nothirium"}
         ),
         
         // ════════════════════════════════════════════════════════════════════════════════════════════
-        // CHUNK OPTIMIZATION MODS (Priority 750) - Chunk rendering optimizations
+        // TRADITIONAL CHUNK RENDERERS (Priority 700)
         // ════════════════════════════════════════════════════════════════════════════════════════════
         
         new ModSignature(
@@ -26435,68 +26899,42 @@ static final class CompatibilityLayer {
                 "glEnableClientState", "glDisableClientState",
                 "vertexPointer", "colorPointer", "texCoordPointer", "normalPointer"
             },
-            750, true, false,
-            new String[]{}
-        ),
-        
-        new ModSignature(
-            "vintagium", "Vintagium",
-            new String[]{"me.jellysquid.mods.sodium."},
-            new String[]{"vintagium.mixins.json"},
-            new String[]{},
-            750, true, false,
-            new String[]{}
-        ),
-        
-        new ModSignature(
-            "celeritas", "Celeritas",
-            new String[]{"com.github.argon4w.celeritas."},
-            new String[]{"celeritas.mixins.json"},
-            new String[]{},
-            750, false, false,
-            new String[]{}
+            700, true, false,
+            new String[]{"neonium", "vintagium", "relictium", "kirino", "celeritas"}
         ),
         
         // ════════════════════════════════════════════════════════════════════════════════════════════
-        // RENDERING ENHANCEMENT MODS (Priority 600) - Additional rendering features
+        // ENTITY/CULLING RENDERERS (Priority 600-650)
         // ════════════════════════════════════════════════════════════════════════════════════════════
         
         new ModSignature(
-            "immersive_portals", "Immersive Portals",
-            new String[]{"qouteall.imm_ptl.", "qouteall.immersive_portals."},
-            new String[]{"immersive_portals.mixins.json"},
-            new String[]{
-                "clear", "viewport", "enableDepthTest", "disableDepthTest",
-                "depthMask", "colorMask"
-            },
-            600, true, false,
+            "entity_culling", "Entity Culling",
+            new String[]{"dev.tr7zw.entityculling."},
+            new String[]{"entityculling.mixins.json"},
+            new String[]{}, // Uses @Inject
+            650, false, false,
             new String[]{}
         ),
         
         new ModSignature(
-            "better_fps", "BetterFps",
-            new String[]{"me.guichaguri.betterfps."},
-            new String[]{"betterfps.mixins.json"},
+            "better_foliage", "Better Foliage",
+            new String[]{"mods.betterfoliage."},
+            new String[]{"betterfoliage.mixins.json"},
             new String[]{},
             600, false, false,
             new String[]{}
         ),
         
-        new ModSignature(
-            "foamfix", "FoamFix",
-            new String[]{"pl.asie.foamfix."},
-            new String[]{"foamfix.mixins.json"},
-            new String[]{},
-            600, false, false,
-            new String[]{}
-        ),
+        // ════════════════════════════════════════════════════════════════════════════════════════════
+        // LIGHTING/EFFECT MODS (Priority 500)
+        // ════════════════════════════════════════════════════════════════════════════════════════════
         
         new ModSignature(
-            "fastcraft", "FastCraft",
-            new String[]{"fastcraft."},
-            new String[]{}, // FastCraft uses ASM, not Mixin
+            "dynamic_lights", "Dynamic Lights",
+            new String[]{"atomicstryker.dynamiclights."},
+            new String[]{}, // No mixins, uses ASM
             new String[]{},
-            600, true, false,
+            500, false, false,
             new String[]{}
         )
     };
@@ -26746,40 +27184,116 @@ static final class CompatibilityLayer {
         }
     }
     
-    /**
+/**
      * Get known class names for a mod based on its prefix.
      */
     private static String[] getKnownClassesForMod(String modId, String prefix) {
         return switch (modId) {
+            // ════════════════════════════════════════════════════════════════════════════════
+            // SHADER MODS (Priority 1000)
+            // ════════════════════════════════════════════════════════════════════════════════
+            
             case "optifine" -> new String[]{
-                "optifine.Config", 
                 "optifine.OptiFineClassTransformer",
+                "optifine.OptiFineForgeTweaker",
+                "optifine.Config", 
                 "optifine.shaders.Shaders",
                 "net.optifine.Config",
-                "Config" // Some versions use root package
+                "Config", // Some versions use root package
+                "VersionCheckThread"
             };
-            case "iris", "oculus" -> new String[]{
-                "net.irisshaders.iris.Iris",
+            
+            case "oculus" -> new String[]{
                 "net.coderbot.iris.Iris",
+                "net.coderbot.iris.IrisMod",
+                "net.irisshaders.iris.Iris",
                 "net.irisshaders.iris.api.v0.IrisApi"
             };
-            case "sodium" -> new String[]{
+            
+            // ════════════════════════════════════════════════════════════════════════════════
+            // POLYGLOT/ECS ENGINES (Priority 850-1125)
+            // ════════════════════════════════════════════════════════════════════════════════
+            
+            case "snowium" -> new String[]{
+                "com.example.modid", // Detection class
+                "snowium.SnowiumMod",
+                "dev.snowium.Snowium",
+                "dev.snowium.SnowiumCore"
+            };
+            
+            case "kirino" -> new String[]{
+                "com.cleanroommc.kirino.Kirino",
+                "com.cleanroommc.kirino.KirinoMod",
+                "com.cleanroommc.kirino.KirinoCore"
+            };
+            
+            // ════════════════════════════════════════════════════════════════════════════════
+            // SODIUM-BASED RENDERERS (Priority 750)
+            // ════════════════════════════════════════════════════════════════════════════════
+            
+            case "neonium" -> new String[]{
                 "me.jellysquid.mods.sodium.client.SodiumClientMod",
-                "me.jellysquid.mods.sodium.SodiumMod",
+                "neonium.NeoniumMod",
+                "me.jellysquid.mods.sodium.NeoniumMod",
                 "net.caffeinemc.mods.sodium.client.SodiumClientMod"
             };
-            case "rubidium" -> new String[]{
-                "me.jellysquid.mods.rubidium.RubidiumMod",
+            
+            case "relictium" -> new String[]{
+                "relictium.RelictiumMod",
                 "me.jellysquid.mods.sodium.client.SodiumClientMod"
             };
-            case "embeddium" -> new String[]{
-                "org.embeddedt.embeddium.Embeddium",
-                "org.embeddedt.embeddium.impl.Embeddium"
+            
+            case "vintagium" -> new String[]{
+                "vintagium.VintagiumMod",
+                "me.jellysquid.mods.sodium.client.SodiumClientMod"
             };
+            
+            // ════════════════════════════════════════════════════════════════════════════════
+            // EMBEDDIUM-BASED RENDERERS (Priority 750)
+            // ════════════════════════════════════════════════════════════════════════════════
+            
+            case "celeritas" -> new String[]{
+                "org.embeddedt.embeddium.impl.Embeddium",
+                "org.embeddedt.embeddium.client.EmbeddiumClientMod",
+                "net.celeritas.CeleritasMod"
+            };
+            
+            // ════════════════════════════════════════════════════════════════════════════════
+            // TRADITIONAL CHUNK RENDERERS (Priority 700)
+            // ════════════════════════════════════════════════════════════════════════════════
+            
             case "nothirium" -> new String[]{
                 "meldexun.nothirium.Nothirium",
                 "meldexun.nothirium.NothiriumMod"
             };
+            
+            // ════════════════════════════════════════════════════════════════════════════════
+            // ENTITY/CULLING RENDERERS (Priority 600-650)
+            // ════════════════════════════════════════════════════════════════════════════════
+            
+            case "entity_culling" -> new String[]{
+                "dev.tr7zw.entityculling.EntityCullingMod",
+                "dev.tr7zw.entityculling.EntityCulling"
+            };
+            
+            case "better_foliage" -> new String[]{
+                "mods.betterfoliage.BetterFoliage",
+                "mods.betterfoliage.BetterFoliageMod"
+            };
+            
+            // ════════════════════════════════════════════════════════════════════════════════
+            // LIGHTING/EFFECT MODS (Priority 500)
+            // ════════════════════════════════════════════════════════════════════════════════
+            
+            case "dynamic_lights" -> new String[]{
+                "atomicstryker.dynamiclights.client.DynamicLights",
+                "atomicstryker.dynamiclights.DynamicLightsMod"
+            };
+            
+            // ════════════════════════════════════════════════════════════════════════════════
+            // FALLBACK
+            // ════════════════════════════════════════════════════════════════════════════════
+            
             default -> new String[]{prefix + "Main", prefix + "Mod", prefix + "Core"};
         };
     }
@@ -26799,7 +27313,7 @@ static final class CompatibilityLayer {
                 MethodConflict conflict = new MethodConflict(
                     targetClass.className,
                     methodName,
-                    "(*)V", // Placeholder - will be resolved at transform time
+                    "(*)V",
                     mod.modId,
                     mod.classSignatures[0] + "Mixin",
                     methodName,
