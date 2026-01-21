@@ -1,7 +1,7 @@
 package com.example.modid.gl.vulkan;
 
 import com.example.modid.gl.buffer.ops.BufferOps;
-import com.example.modid.gl.mapping.VulkanCallMapper;
+import com.example.modid.gl.mapping.VulkanCallMapperX;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -561,7 +561,7 @@ public class VulkanBufferOps10 implements BufferOps {
          * vkInstance = pInstance.get(0);
          */
         
-        vkInstance = VulkanCallMapper.vkCreateInstance(validationEnabled);
+        vkInstance = VulkanCallMapperX.vkCreateInstance(validationEnabled);
         return vkInstance != VK_NULL_HANDLE;
     }
     
@@ -589,7 +589,7 @@ public class VulkanBufferOps10 implements BufferOps {
          * vkPhysicalDevice = bestDevice;
          */
         
-        vkPhysicalDevice = VulkanCallMapper.vkSelectPhysicalDevice(vkInstance);
+        vkPhysicalDevice = VulkanCallMapperX.vkSelectPhysicalDevice(vkInstance);
         return vkPhysicalDevice != VK_NULL_HANDLE;
     }
     
@@ -635,7 +635,7 @@ public class VulkanBufferOps10 implements BufferOps {
          * }
          */
         
-        VulkanCallMapper.vkCacheMemoryTypes(vkPhysicalDevice, memoryTypeCache);
+        VulkanCallMapperX.vkCacheMemoryTypes(vkPhysicalDevice, memoryTypeCache);
     }
     
     protected boolean createLogicalDevice() {
@@ -690,19 +690,19 @@ public class VulkanBufferOps10 implements BufferOps {
          * vkGetDeviceQueue(vkDevice, computeQueueFamily, 0, computeQueue);
          */
         
-        int[] queueFamilies = VulkanCallMapper.vkFindQueueFamilies(vkPhysicalDevice);
+        int[] queueFamilies = VulkanCallMapperX.vkFindQueueFamilies(vkPhysicalDevice);
         graphicsQueueFamily = queueFamilies[0];
         transferQueueFamily = queueFamilies[1];
         computeQueueFamily = queueFamilies[2];
         
-        vkDevice = VulkanCallMapper.vkCreateLogicalDevice(
+        vkDevice = VulkanCallMapperX.vkCreateLogicalDevice(
             vkPhysicalDevice, graphicsQueueFamily, transferQueueFamily, computeQueueFamily);
         
         if (vkDevice == VK_NULL_HANDLE) return false;
         
-        vkGraphicsQueue = VulkanCallMapper.vkGetDeviceQueue(vkDevice, graphicsQueueFamily, 0);
-        vkTransferQueue = VulkanCallMapper.vkGetDeviceQueue(vkDevice, transferQueueFamily, 0);
-        vkComputeQueue = VulkanCallMapper.vkGetDeviceQueue(vkDevice, computeQueueFamily, 0);
+        vkGraphicsQueue = VulkanCallMapperX.vkGetDeviceQueue(vkDevice, graphicsQueueFamily, 0);
+        vkTransferQueue = VulkanCallMapperX.vkGetDeviceQueue(vkDevice, transferQueueFamily, 0);
+        vkComputeQueue = VulkanCallMapperX.vkGetDeviceQueue(vkDevice, computeQueueFamily, 0);
         
         return true;
     }
@@ -724,8 +724,8 @@ public class VulkanBufferOps10 implements BufferOps {
          * vkTransferCommandPool = pPool.get(0);
          */
         
-        vkCommandPool = VulkanCallMapper.vkCreateCommandPool(vkDevice, graphicsQueueFamily, true);
-        vkTransferCommandPool = VulkanCallMapper.vkCreateCommandPool(vkDevice, transferQueueFamily, true);
+        vkCommandPool = VulkanCallMapperX.vkCreateCommandPool(vkDevice, graphicsQueueFamily, true);
+        vkTransferCommandPool = VulkanCallMapperX.vkCreateCommandPool(vkDevice, transferQueueFamily, true);
         
         return vkCommandPool != VK_NULL_HANDLE && vkTransferCommandPool != VK_NULL_HANDLE;
     }
@@ -825,19 +825,19 @@ public class VulkanBufferOps10 implements BufferOps {
          * vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
          */
         
-        long bufferHandle = VulkanCallMapper.vkCreateBuffer(vkDevice, size, usage);
+        long bufferHandle = VulkanCallMapperX.vkCreateBuffer(vkDevice, size, usage);
         if (bufferHandle == VK_NULL_HANDLE) return null;
         
-        long memReqSize = VulkanCallMapper.vkGetBufferMemoryRequirements(vkDevice, bufferHandle);
+        long memReqSize = VulkanCallMapperX.vkGetBufferMemoryRequirements(vkDevice, bufferHandle);
         int memTypeIndex = findMemoryType(memoryProperties);
         
-        long memoryHandle = VulkanCallMapper.vkAllocateMemory(vkDevice, memReqSize, memTypeIndex);
+        long memoryHandle = VulkanCallMapperX.vkAllocateMemory(vkDevice, memReqSize, memTypeIndex);
         if (memoryHandle == VK_NULL_HANDLE) {
-            VulkanCallMapper.vkDestroyBuffer(vkDevice, bufferHandle);
+            VulkanCallMapperX.vkDestroyBuffer(vkDevice, bufferHandle);
             return null;
         }
         
-        VulkanCallMapper.vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
+        VulkanCallMapperX.vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
         
         VulkanBuffer buffer = new VulkanBuffer(bufferHandle, memoryHandle, size, usage, memoryProperties);
         
@@ -1091,11 +1091,11 @@ public class VulkanBufferOps10 implements BufferOps {
          * if (result != VK_SUCCESS) return null;
          * return pData.getByteBuffer(0, (int) size);
          */
-        return VulkanCallMapper.vkMapMemory(vkDevice, memory, offset, size);
+        return VulkanCallMapperX.vkMapMemory(vkDevice, memory, offset, size);
     }
     
     protected void unmapMemory(long memory) {
-        VulkanCallMapper.vkUnmapMemory(vkDevice, memory);
+        VulkanCallMapperX.vkUnmapMemory(vkDevice, memory);
     }
     
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -1114,8 +1114,8 @@ public class VulkanBufferOps10 implements BufferOps {
         }
         
         // Destroy buffer and free memory
-        VulkanCallMapper.vkDestroyBuffer(vkDevice, buffer.handle);
-        VulkanCallMapper.vkFreeMemory(vkDevice, buffer.memory);
+        VulkanCallMapperX.vkDestroyBuffer(vkDevice, buffer.handle);
+        VulkanCallMapperX.vkFreeMemory(vkDevice, buffer.memory);
         
         STAT_BUFFERS_DESTROYED.incrementAndGet();
         STAT_BYTES_FREED.addAndGet(buffer.size);
@@ -1157,7 +1157,7 @@ public class VulkanBufferOps10 implements BufferOps {
          * vkAllocateCommandBuffers(vkDevice, allocInfo, pCmdBuffer);
          * return pCmdBuffer.get(0);
          */
-        return VulkanCallMapper.vkAllocateCommandBuffer(vkDevice, pool, level);
+        return VulkanCallMapperX.vkAllocateCommandBuffer(vkDevice, pool, level);
     }
     
     protected void beginCommandBuffer(long cmdBuffer, int flags) {
@@ -1167,12 +1167,12 @@ public class VulkanBufferOps10 implements BufferOps {
          *     .flags(flags);
          * vkBeginCommandBuffer(cmdBuffer, beginInfo);
          */
-        VulkanCallMapper.vkBeginCommandBuffer(cmdBuffer, flags);
+        VulkanCallMapperX.vkBeginCommandBuffer(cmdBuffer, flags);
         STAT_COMMAND_BUFFERS_RECORDED.incrementAndGet();
     }
     
     protected void endCommandBuffer(long cmdBuffer) {
-        VulkanCallMapper.vkEndCommandBuffer(cmdBuffer);
+        VulkanCallMapperX.vkEndCommandBuffer(cmdBuffer);
     }
     
     protected void recordBufferCopy(long cmdBuffer, long src, long dst, long srcOff, long dstOff, long size) {
@@ -1183,7 +1183,7 @@ public class VulkanBufferOps10 implements BufferOps {
          *     .size(size);
          * vkCmdCopyBuffer(cmdBuffer, src, dst, region);
          */
-        VulkanCallMapper.vkCmdCopyBuffer(cmdBuffer, src, dst, srcOff, dstOff, size);
+        VulkanCallMapperX.vkCmdCopyBuffer(cmdBuffer, src, dst, srcOff, dstOff, size);
     }
     
     protected void recordBufferBarrier(long cmdBuffer, 
@@ -1203,7 +1203,7 @@ public class VulkanBufferOps10 implements BufferOps {
          * 
          * vkCmdPipelineBarrier(cmdBuffer, srcStage, dstStage, 0, null, barrier, null);
          */
-        VulkanCallMapper.vkCmdPipelineBarrier(cmdBuffer, srcStage, dstStage, 
+        VulkanCallMapperX.vkCmdPipelineBarrier(cmdBuffer, srcStage, dstStage, 
             srcAccess, dstAccess, buffer, offset, size);
     }
     
@@ -1217,7 +1217,7 @@ public class VulkanBufferOps10 implements BufferOps {
          * 
          * vkQueueSubmit(queue, submitInfo, fence);
          */
-        VulkanCallMapper.vkQueueSubmit(queue, cmdBuffer, fence);
+        VulkanCallMapperX.vkQueueSubmit(queue, cmdBuffer, fence);
     }
     
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -1234,7 +1234,7 @@ public class VulkanBufferOps10 implements BufferOps {
          * vkCreateFence(vkDevice, fenceInfo, null, pFence);
          * return pFence.get(0);
          */
-        return VulkanCallMapper.vkCreateFence(vkDevice, signaled);
+        return VulkanCallMapperX.vkCreateFence(vkDevice, signaled);
     }
     
     protected long acquireFence() {
@@ -1262,7 +1262,7 @@ public class VulkanBufferOps10 implements BufferOps {
         /*
          * vkWaitForFences(vkDevice, fence, VK_TRUE, timeout);
          */
-        VulkanCallMapper.vkWaitForFences(vkDevice, fence, true, timeout);
+        VulkanCallMapperX.vkWaitForFences(vkDevice, fence, true, timeout);
         STAT_FENCES_WAITED.incrementAndGet();
     }
     
@@ -1270,11 +1270,11 @@ public class VulkanBufferOps10 implements BufferOps {
         /*
          * return vkGetFenceStatus(vkDevice, fence) == VK_SUCCESS;
          */
-        return VulkanCallMapper.vkGetFenceStatus(vkDevice, fence) == VK_SUCCESS;
+        return VulkanCallMapperX.vkGetFenceStatus(vkDevice, fence) == VK_SUCCESS;
     }
     
     protected void resetFence(long fence) {
-        VulkanCallMapper.vkResetFences(vkDevice, fence);
+        VulkanCallMapperX.vkResetFences(vkDevice, fence);
     }
     
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -1537,7 +1537,7 @@ public class VulkanBufferOps10 implements BufferOps {
     
     protected void cleanup() {
         if (vkDevice != VK_NULL_HANDLE) {
-            VulkanCallMapper.vkDeviceWaitIdle(vkDevice);
+            VulkanCallMapperX.vkDeviceWaitIdle(vkDevice);
         }
         
         // Destroy all managed buffers
@@ -1545,8 +1545,8 @@ public class VulkanBufferOps10 implements BufferOps {
             if (buffer.persistentMap != null) {
                 unmapMemory(buffer.memory);
             }
-            VulkanCallMapper.vkDestroyBuffer(vkDevice, buffer.handle);
-            VulkanCallMapper.vkFreeMemory(vkDevice, buffer.memory);
+            VulkanCallMapperX.vkDestroyBuffer(vkDevice, buffer.handle);
+            VulkanCallMapperX.vkFreeMemory(vkDevice, buffer.memory);
         }
         managedBuffers.clear();
         
@@ -1557,8 +1557,8 @@ public class VulkanBufferOps10 implements BufferOps {
                     if (staging.persistentMap != null) {
                         unmapMemory(staging.memory);
                     }
-                    VulkanCallMapper.vkDestroyBuffer(vkDevice, staging.handle);
-                    VulkanCallMapper.vkFreeMemory(vkDevice, staging.memory);
+                    VulkanCallMapperX.vkDestroyBuffer(vkDevice, staging.handle);
+                    VulkanCallMapperX.vkFreeMemory(vkDevice, staging.memory);
                 }
             }
         }
@@ -1567,32 +1567,32 @@ public class VulkanBufferOps10 implements BufferOps {
         while (!availableFences.isEmpty()) {
             Long fence = availableFences.poll();
             if (fence != null) {
-                VulkanCallMapper.vkDestroyFence(vkDevice, fence);
+                VulkanCallMapperX.vkDestroyFence(vkDevice, fence);
             }
         }
         
         for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             if (frameFences[i] != VK_NULL_HANDLE) {
-                VulkanCallMapper.vkDestroyFence(vkDevice, frameFences[i]);
+                VulkanCallMapperX.vkDestroyFence(vkDevice, frameFences[i]);
             }
         }
         
         // Destroy command pools
         if (vkCommandPool != VK_NULL_HANDLE) {
-            VulkanCallMapper.vkDestroyCommandPool(vkDevice, vkCommandPool);
+            VulkanCallMapperX.vkDestroyCommandPool(vkDevice, vkCommandPool);
         }
         if (vkTransferCommandPool != VK_NULL_HANDLE) {
-            VulkanCallMapper.vkDestroyCommandPool(vkDevice, vkTransferCommandPool);
+            VulkanCallMapperX.vkDestroyCommandPool(vkDevice, vkTransferCommandPool);
         }
         
         // Destroy device
         if (vkDevice != VK_NULL_HANDLE) {
-            VulkanCallMapper.vkDestroyDevice(vkDevice);
+            VulkanCallMapperX.vkDestroyDevice(vkDevice);
         }
         
         // Destroy instance
         if (vkInstance != VK_NULL_HANDLE) {
-            VulkanCallMapper.vkDestroyInstance(vkInstance);
+            VulkanCallMapperX.vkDestroyInstance(vkInstance);
         }
         
         initialized = false;
