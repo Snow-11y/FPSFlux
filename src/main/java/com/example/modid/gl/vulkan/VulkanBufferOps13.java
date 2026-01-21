@@ -1,7 +1,7 @@
 package com.example.modid.gl.vulkan;
 
 import com.example.modid.gl.buffer.ops.BufferOps;
-import com.example.modid.gl.mapping.VulkanCallMapper;
+import com.example.modid.gl.mapping.VulkanCallMapperX;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -957,7 +957,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
          * vkGetPhysicalDeviceProperties2(vkPhysicalDevice, props2);
          */
         
-        VulkanCallMapper.vkGetVulkan13Features(vkPhysicalDevice, vulkan13Features);
+        VulkanCallMapperX.vkGetVulkan13Features(vkPhysicalDevice, vulkan13Features);
         
         System.out.println("[Vulkan 1.3] " + vulkan13Features);
     }
@@ -1029,7 +1029,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
          * vkCmdBeginRendering(commandBuffer, vkRenderingInfo);
          */
         
-        VulkanCallMapper.vkCmdBeginRendering(commandBuffer, renderingInfo);
+        VulkanCallMapperX.vkCmdBeginRendering(commandBuffer, renderingInfo);
         STAT_DYNAMIC_RENDERING_BEGINS.incrementAndGet();
     }
     
@@ -1037,7 +1037,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
      * End dynamic rendering.
      */
     public void cmdEndRendering(long commandBuffer) {
-        VulkanCallMapper.vkCmdEndRendering(commandBuffer);
+        VulkanCallMapperX.vkCmdEndRendering(commandBuffer);
     }
     
     /**
@@ -1105,7 +1105,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
          * vkCmdPipelineBarrier2(commandBuffer, vkDepInfo);
          */
         
-        VulkanCallMapper.vkCmdPipelineBarrier2(commandBuffer, dependencyInfo);
+        VulkanCallMapperX.vkCmdPipelineBarrier2(commandBuffer, dependencyInfo);
         STAT_SYNC2_BARRIERS.incrementAndGet();
     }
     
@@ -1175,7 +1175,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
         
         DynamicStateTracker tracker = dynamicStateTracker.get();
         if (tracker.cullMode != cullMode) {
-            VulkanCallMapper.vkCmdSetCullMode(commandBuffer, cullMode);
+            VulkanCallMapperX.vkCmdSetCullMode(commandBuffer, cullMode);
             tracker.cullMode = cullMode;
             STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
         }
@@ -1191,7 +1191,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
         
         DynamicStateTracker tracker = dynamicStateTracker.get();
         if (tracker.frontFace != frontFace) {
-            VulkanCallMapper.vkCmdSetFrontFace(commandBuffer, frontFace);
+            VulkanCallMapperX.vkCmdSetFrontFace(commandBuffer, frontFace);
             tracker.frontFace = frontFace;
             STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
         }
@@ -1207,7 +1207,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
         
         DynamicStateTracker tracker = dynamicStateTracker.get();
         if (tracker.primitiveTopology != primitiveTopology) {
-            VulkanCallMapper.vkCmdSetPrimitiveTopology(commandBuffer, primitiveTopology);
+            VulkanCallMapperX.vkCmdSetPrimitiveTopology(commandBuffer, primitiveTopology);
             tracker.primitiveTopology = primitiveTopology;
             STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
         }
@@ -1223,7 +1223,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
         
         DynamicStateTracker tracker = dynamicStateTracker.get();
         if (tracker.depthTestEnable != depthTestEnable) {
-            VulkanCallMapper.vkCmdSetDepthTestEnable(commandBuffer, depthTestEnable);
+            VulkanCallMapperX.vkCmdSetDepthTestEnable(commandBuffer, depthTestEnable);
             tracker.depthTestEnable = depthTestEnable;
             STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
         }
@@ -1239,7 +1239,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
         
         DynamicStateTracker tracker = dynamicStateTracker.get();
         if (tracker.depthWriteEnable != depthWriteEnable) {
-            VulkanCallMapper.vkCmdSetDepthWriteEnable(commandBuffer, depthWriteEnable);
+            VulkanCallMapperX.vkCmdSetDepthWriteEnable(commandBuffer, depthWriteEnable);
             tracker.depthWriteEnable = depthWriteEnable;
             STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
         }
@@ -1255,7 +1255,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
         
         DynamicStateTracker tracker = dynamicStateTracker.get();
         if (tracker.depthCompareOp != depthCompareOp) {
-            VulkanCallMapper.vkCmdSetDepthCompareOp(commandBuffer, depthCompareOp);
+            VulkanCallMapperX.vkCmdSetDepthCompareOp(commandBuffer, depthCompareOp);
             tracker.depthCompareOp = depthCompareOp;
             STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
         }
@@ -1271,7 +1271,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
         
         DynamicStateTracker tracker = dynamicStateTracker.get();
         if (tracker.depthBoundsTestEnable != enable) {
-            VulkanCallMapper.vkCmdSetDepthBoundsTestEnable(commandBuffer, enable);
+            VulkanCallMapperX.vkCmdSetDepthBoundsTestEnable(commandBuffer, enable);
             tracker.depthBoundsTestEnable = enable;
             STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
         }
@@ -1287,7 +1287,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
         
         DynamicStateTracker tracker = dynamicStateTracker.get();
         if (tracker.stencilTestEnable != enable) {
-            VulkanCallMapper.vkCmdSetStencilTestEnable(commandBuffer, enable);
+            VulkanCallMapperX.vkCmdSetStencilTestEnable(commandBuffer, enable);
             tracker.stencilTestEnable = enable;
             STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
         }
@@ -1302,7 +1302,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
             throw new UnsupportedOperationException("Extended dynamic state not supported");
         }
         
-        VulkanCallMapper.vkCmdSetStencilOp(commandBuffer, faceMask, failOp, passOp, depthFailOp, compareOp);
+        VulkanCallMapperX.vkCmdSetStencilOp(commandBuffer, faceMask, failOp, passOp, depthFailOp, compareOp);
         STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
     }
     
@@ -1316,7 +1316,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
         
         DynamicStateTracker tracker = dynamicStateTracker.get();
         if (tracker.rasterizerDiscardEnable != enable) {
-            VulkanCallMapper.vkCmdSetRasterizerDiscardEnable(commandBuffer, enable);
+            VulkanCallMapperX.vkCmdSetRasterizerDiscardEnable(commandBuffer, enable);
             tracker.rasterizerDiscardEnable = enable;
             STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
         }
@@ -1332,7 +1332,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
         
         DynamicStateTracker tracker = dynamicStateTracker.get();
         if (tracker.depthBiasEnable != enable) {
-            VulkanCallMapper.vkCmdSetDepthBiasEnable(commandBuffer, enable);
+            VulkanCallMapperX.vkCmdSetDepthBiasEnable(commandBuffer, enable);
             tracker.depthBiasEnable = enable;
             STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
         }
@@ -1348,7 +1348,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
         
         DynamicStateTracker tracker = dynamicStateTracker.get();
         if (tracker.primitiveRestartEnable != enable) {
-            VulkanCallMapper.vkCmdSetPrimitiveRestartEnable(commandBuffer, enable);
+            VulkanCallMapperX.vkCmdSetPrimitiveRestartEnable(commandBuffer, enable);
             tracker.primitiveRestartEnable = enable;
             STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
         }
@@ -1364,7 +1364,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
         
         DynamicStateTracker tracker = dynamicStateTracker.get();
         if (tracker.depthClampEnable != enable) {
-            VulkanCallMapper.vkCmdSetDepthClampEnable(commandBuffer, enable);
+            VulkanCallMapperX.vkCmdSetDepthClampEnable(commandBuffer, enable);
             tracker.depthClampEnable = enable;
             STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
         }
@@ -1380,7 +1380,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
         
         DynamicStateTracker tracker = dynamicStateTracker.get();
         if (tracker.polygonMode != polygonMode) {
-            VulkanCallMapper.vkCmdSetPolygonMode(commandBuffer, polygonMode);
+            VulkanCallMapperX.vkCmdSetPolygonMode(commandBuffer, polygonMode);
             tracker.polygonMode = polygonMode;
             STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
         }
@@ -1396,7 +1396,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
         
         DynamicStateTracker tracker = dynamicStateTracker.get();
         if (tracker.logicOpEnable != enable) {
-            VulkanCallMapper.vkCmdSetLogicOpEnable(commandBuffer, enable);
+            VulkanCallMapperX.vkCmdSetLogicOpEnable(commandBuffer, enable);
             tracker.logicOpEnable = enable;
             STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
         }
@@ -1412,7 +1412,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
         
         DynamicStateTracker tracker = dynamicStateTracker.get();
         if (tracker.logicOp != logicOp) {
-            VulkanCallMapper.vkCmdSetLogicOp(commandBuffer, logicOp);
+            VulkanCallMapperX.vkCmdSetLogicOp(commandBuffer, logicOp);
             tracker.logicOp = logicOp;
             STAT_DYNAMIC_STATE_CHANGES.incrementAndGet();
         }
@@ -1555,7 +1555,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
             throw new IllegalStateException("Maximum private data slots reached");
         }
         
-        long slot = VulkanCallMapper.vkCreatePrivateDataSlot(vkDevice);
+        long slot = VulkanCallMapperX.vkCreatePrivateDataSlot(vkDevice);
         if (slot != VK_NULL_HANDLE) {
             privateDataSlots.put(slot, 0L);
             privateDataSlotCounter.incrementAndGet();
@@ -1568,7 +1568,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
      * Set private data.
      */
     public void setPrivateData(long objectHandle, long slot, long data) {
-        VulkanCallMapper.vkSetPrivateData(vkDevice, objectHandle, slot, data);
+        VulkanCallMapperX.vkSetPrivateData(vkDevice, objectHandle, slot, data);
         privateDataSlots.put(slot, data);
     }
     
@@ -1576,7 +1576,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
      * Get private data.
      */
     public long getPrivateData(long objectHandle, long slot) {
-        return VulkanCallMapper.vkGetPrivateData(vkDevice, objectHandle, slot);
+        return VulkanCallMapperX.vkGetPrivateData(vkDevice, objectHandle, slot);
     }
     
     /**
@@ -1584,7 +1584,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
      */
     public void destroyPrivateDataSlot(long slot) {
         privateDataSlots.remove(slot);
-        VulkanCallMapper.vkDestroyPrivateDataSlot(vkDevice, slot);
+        VulkanCallMapperX.vkDestroyPrivateDataSlot(vkDevice, slot);
         privateDataSlotCounter.decrementAndGet();
     }
     
@@ -1722,7 +1722,7 @@ public class VulkanBufferOps13 extends VulkanBufferOps12 {
     protected void cleanup() {
         // Destroy private data slots
         for (Long slot : privateDataSlots.keySet()) {
-            VulkanCallMapper.vkDestroyPrivateDataSlot(vkDevice, slot);
+            VulkanCallMapperX.vkDestroyPrivateDataSlot(vkDevice, slot);
         }
         privateDataSlots.clear();
         privateDataSlotCounter.set(0);
