@@ -1,7 +1,7 @@
 package com.example.modid.gl.vulkan;
 
 import com.example.modid.gl.buffer.ops.BufferOps;
-import com.example.modid.gl.mapping.VulkanCallMapper;
+import com.example.modid.gl.mapping.VulkanCallMapperX;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -896,7 +896,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * subgroupProperties.quadOperationsInAllStages = subgroupProps.quadOperationsInAllStages();
          */
         
-        int[] props = VulkanCallMapper.vkGetSubgroupProperties(vkPhysicalDevice);
+        int[] props = VulkanCallMapperX.vkGetSubgroupProperties(vkPhysicalDevice);
         if (props != null && props.length >= 4) {
             subgroupProperties.subgroupSize = props[0];
             subgroupProperties.supportedOperations = props[1];
@@ -980,7 +980,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * }
          */
         
-        long[][] groups = VulkanCallMapper.vkEnumeratePhysicalDeviceGroups(vkInstance);
+        long[][] groups = VulkanCallMapperX.vkEnumeratePhysicalDeviceGroups(vkInstance);
         if (groups == null || groups.length == 0) {
             // Single device, create simple group
             deviceGroup = new DeviceGroup(new long[] { vkPhysicalDevice }, false);
@@ -1038,7 +1038,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
                         VK_PEER_MEMORY_FEATURE_GENERIC_DST_BIT;
                 } else {
                     deviceGroup.peerMemoryFeatures[src][dst] = 
-                        VulkanCallMapper.vkGetDeviceGroupPeerMemoryFeatures(vkDevice, 0, src, dst);
+                        VulkanCallMapperX.vkGetDeviceGroupPeerMemoryFeatures(vkDevice, 0, src, dst);
                 }
             }
         }
@@ -1052,7 +1052,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
         
         for (int i = 0; i < deviceGroup.deviceCount; i++) {
             DeviceProperties props = new DeviceProperties();
-            VulkanCallMapper.vkGetPhysicalDeviceProperties(deviceGroup.physicalDevices[i], props);
+            VulkanCallMapperX.vkGetPhysicalDeviceProperties(deviceGroup.physicalDevices[i], props);
             deviceGroup.deviceProperties[i] = props;
         }
     }
@@ -1115,24 +1115,24 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * vkBindBufferMemory2(vkDevice, bindInfo);
          */
         
-        long bufferHandle = VulkanCallMapper.vkCreateBuffer(vkDevice, size, usage);
+        long bufferHandle = VulkanCallMapperX.vkCreateBuffer(vkDevice, size, usage);
         if (bufferHandle == VK_NULL_HANDLE) return 0;
         
-        long memReqSize = VulkanCallMapper.vkGetBufferMemoryRequirements(vkDevice, bufferHandle);
+        long memReqSize = VulkanCallMapperX.vkGetBufferMemoryRequirements(vkDevice, bufferHandle);
         int memTypeIndex = findMemoryType(memoryProperties);
         int allDevicesMask = deviceGroup.getAllDevicesMask();
         
         // Allocate with device mask
-        long memoryHandle = VulkanCallMapper.vkAllocateMemoryWithDeviceMask(
+        long memoryHandle = VulkanCallMapperX.vkAllocateMemoryWithDeviceMask(
             vkDevice, memReqSize, memTypeIndex, allDevicesMask);
         
         if (memoryHandle == VK_NULL_HANDLE) {
-            VulkanCallMapper.vkDestroyBuffer(vkDevice, bufferHandle);
+            VulkanCallMapperX.vkDestroyBuffer(vkDevice, bufferHandle);
             return 0;
         }
         
         // Bind memory with device group info
-        VulkanCallMapper.vkBindBufferMemory2WithDeviceGroup(
+        VulkanCallMapperX.vkBindBufferMemory2WithDeviceGroup(
             vkDevice, bufferHandle, memoryHandle, 0, deviceGroup.deviceCount);
         
         // Create per-device memory array
@@ -1216,12 +1216,12 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
         long cmdBuffer = acquireTransferCommandBuffer();
         int deviceMask = (1 << srcDevice) | (1 << dstDevice);
         
-        VulkanCallMapper.vkBeginCommandBufferWithDeviceGroup(cmdBuffer, deviceMask);
-        VulkanCallMapper.vkCmdCopyBuffer(cmdBuffer, dgBuffer.handle, dgBuffer.handle, 0, 0, dgBuffer.size);
-        VulkanCallMapper.vkEndCommandBuffer(cmdBuffer);
+        VulkanCallMapperX.vkBeginCommandBufferWithDeviceGroup(cmdBuffer, deviceMask);
+        VulkanCallMapperX.vkCmdCopyBuffer(cmdBuffer, dgBuffer.handle, dgBuffer.handle, 0, 0, dgBuffer.size);
+        VulkanCallMapperX.vkEndCommandBuffer(cmdBuffer);
         
         long fence = acquireFence();
-        VulkanCallMapper.vkQueueSubmitWithDeviceGroup(vkTransferQueue, cmdBuffer, fence, deviceMask);
+        VulkanCallMapperX.vkQueueSubmitWithDeviceGroup(vkTransferQueue, cmdBuffer, fence, deviceMask);
         waitForFence(fence, DEFAULT_FENCE_TIMEOUT);
         releaseFence(fence);
         
@@ -1280,7 +1280,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * return pTemplate.get(0);
          */
         
-        long templateHandle = VulkanCallMapper.vkCreateDescriptorUpdateTemplate(
+        long templateHandle = VulkanCallMapperX.vkCreateDescriptorUpdateTemplate(
             vkDevice, descriptorSetLayout, entries);
         
         if (templateHandle != VK_NULL_HANDLE) {
@@ -1312,7 +1312,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          *         .set(set);
          */
         
-        long templateHandle = VulkanCallMapper.vkCreatePushDescriptorUpdateTemplate(
+        long templateHandle = VulkanCallMapperX.vkCreatePushDescriptorUpdateTemplate(
             vkDevice, pipelineLayout, set, entries);
         
         if (templateHandle != VK_NULL_HANDLE) {
@@ -1342,7 +1342,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * vkUpdateDescriptorSetWithTemplate(vkDevice, descriptorSet, templateHandle, data);
          */
         
-        VulkanCallMapper.vkUpdateDescriptorSetWithTemplate(
+        VulkanCallMapperX.vkUpdateDescriptorSetWithTemplate(
             vkDevice, descriptorSet, templateHandle, data);
         
         STAT_TEMPLATE_UPDATES.incrementAndGet();
@@ -1358,7 +1358,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * vkCmdPushDescriptorSetWithTemplateKHR(commandBuffer, templateHandle, layout, set, data);
          */
         
-        VulkanCallMapper.vkCmdPushDescriptorSetWithTemplate(
+        VulkanCallMapperX.vkCmdPushDescriptorSetWithTemplate(
             commandBuffer, templateHandle, layout, set, data);
         
         STAT_TEMPLATE_UPDATES.incrementAndGet();
@@ -1369,7 +1369,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
      */
     public void destroyDescriptorUpdateTemplate(long templateHandle) {
         descriptorTemplates.remove(templateHandle);
-        VulkanCallMapper.vkDestroyDescriptorUpdateTemplate(vkDevice, templateHandle);
+        VulkanCallMapperX.vkDestroyDescriptorUpdateTemplate(vkDevice, templateHandle);
     }
     
     /**
@@ -1427,7 +1427,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * storage16BitFeatures.storageInputOutput16 = features16Bit.storageInputOutput16();
          */
         
-        boolean[] features = VulkanCallMapper.vkGet16BitStorageFeatures(vkPhysicalDevice);
+        boolean[] features = VulkanCallMapperX.vkGet16BitStorageFeatures(vkPhysicalDevice);
         if (features != null && features.length >= 4) {
             storage16BitFeatures.storageBuffer16BitAccess = features[0];
             storage16BitFeatures.uniformAndStorageBuffer16BitAccess = features[1];
@@ -1576,7 +1576,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          */
         
         // Verify external memory support
-        int features = VulkanCallMapper.vkGetExternalBufferFeatures(vkPhysicalDevice, usage, handleType);
+        int features = VulkanCallMapperX.vkGetExternalBufferFeatures(vkPhysicalDevice, usage, handleType);
         if ((features & VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT) == 0) {
             throw new UnsupportedOperationException("External memory export not supported for handle type: " + handleType);
         }
@@ -1584,27 +1584,27 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
         boolean dedicatedRequired = (features & VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT) != 0;
         
         // Create buffer with external memory capability
-        long bufferHandle = VulkanCallMapper.vkCreateExternalBuffer(vkDevice, size, usage, handleType);
+        long bufferHandle = VulkanCallMapperX.vkCreateExternalBuffer(vkDevice, size, usage, handleType);
         if (bufferHandle == VK_NULL_HANDLE) {
             throw new RuntimeException("Failed to create external buffer");
         }
         
-        long memReqSize = VulkanCallMapper.vkGetBufferMemoryRequirements(vkDevice, bufferHandle);
+        long memReqSize = VulkanCallMapperX.vkGetBufferMemoryRequirements(vkDevice, bufferHandle);
         int memTypeIndex = findMemoryType(MEMORY_DEVICE_LOCAL);
         
         // Allocate with export and dedicated allocation
-        long memoryHandle = VulkanCallMapper.vkAllocateExternalMemory(
+        long memoryHandle = VulkanCallMapperX.vkAllocateExternalMemory(
             vkDevice, memReqSize, memTypeIndex, handleType, bufferHandle, dedicatedRequired);
         
         if (memoryHandle == VK_NULL_HANDLE) {
-            VulkanCallMapper.vkDestroyBuffer(vkDevice, bufferHandle);
+            VulkanCallMapperX.vkDestroyBuffer(vkDevice, bufferHandle);
             throw new RuntimeException("Failed to allocate external memory");
         }
         
-        VulkanCallMapper.vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
+        VulkanCallMapperX.vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
         
         // Get the external handle
-        long externalHandle = VulkanCallMapper.vkGetMemoryExternalHandle(vkDevice, memoryHandle, handleType);
+        long externalHandle = VulkanCallMapperX.vkGetMemoryExternalHandle(vkDevice, memoryHandle, handleType);
         
         ExternalMemoryHandle handle = new ExternalMemoryHandle(
             bufferHandle, memoryHandle, size, handleType, externalHandle, dedicatedRequired);
@@ -1642,20 +1642,20 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
          */
         
-        long bufferHandle = VulkanCallMapper.vkCreateBuffer(vkDevice, size, usage);
+        long bufferHandle = VulkanCallMapperX.vkCreateBuffer(vkDevice, size, usage);
         if (bufferHandle == VK_NULL_HANDLE) return 0;
         
         int memTypeIndex = findMemoryType(MEMORY_DEVICE_LOCAL);
         
-        long memoryHandle = VulkanCallMapper.vkImportExternalMemory(
+        long memoryHandle = VulkanCallMapperX.vkImportExternalMemory(
             vkDevice, size, memTypeIndex, handleType, externalHandle);
         
         if (memoryHandle == VK_NULL_HANDLE) {
-            VulkanCallMapper.vkDestroyBuffer(vkDevice, bufferHandle);
+            VulkanCallMapperX.vkDestroyBuffer(vkDevice, bufferHandle);
             return 0;
         }
         
-        VulkanCallMapper.vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
+        VulkanCallMapperX.vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
         
         VulkanBuffer buffer = new VulkanBuffer(bufferHandle, memoryHandle, size, usage, MEMORY_DEVICE_LOCAL);
         
@@ -1707,7 +1707,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * vkGetPhysicalDeviceProperties2(vkPhysicalDevice, props2);
          */
         
-        int[] caps = VulkanCallMapper.vkGetMultiviewCapabilities(vkPhysicalDevice);
+        int[] caps = VulkanCallMapperX.vkGetMultiviewCapabilities(vkPhysicalDevice);
         if (caps != null && caps.length >= 5) {
             multiviewCapabilities.multiview = caps[0] != 0;
             multiviewCapabilities.multiviewGeometryShader = caps[1] != 0;
@@ -1774,7 +1774,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * vkGetPhysicalDeviceFeatures2(vkPhysicalDevice, features2);
          */
         
-        boolean[] features = VulkanCallMapper.vkGetProtectedMemoryFeatures(vkPhysicalDevice);
+        boolean[] features = VulkanCallMapperX.vkGetProtectedMemoryFeatures(vkPhysicalDevice);
         if (features != null && features.length >= 2) {
             protectedMemoryCapabilities.protectedMemory = features[0];
             protectedMemoryCapabilities.protectedNoFault = features[1];
@@ -1783,7 +1783,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
         // Find protected queue
         if (protectedMemoryCapabilities.protectedMemory) {
             protectedMemoryCapabilities.protectedQueueIndex = 
-                VulkanCallMapper.vkFindProtectedQueueFamily(vkPhysicalDevice);
+                VulkanCallMapperX.vkFindProtectedQueueFamily(vkPhysicalDevice);
         }
         
         if (protectedMemoryCapabilities.isAvailable()) {
@@ -1821,11 +1821,11 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * protectedCommandPool = pPool.get(0);
          */
         
-        protectedQueue = VulkanCallMapper.vkGetProtectedQueue(
+        protectedQueue = VulkanCallMapperX.vkGetProtectedQueue(
             vkDevice, protectedMemoryCapabilities.protectedQueueIndex);
         
         if (protectedQueue != VK_NULL_HANDLE) {
-            protectedCommandPool = VulkanCallMapper.vkCreateProtectedCommandPool(
+            protectedCommandPool = VulkanCallMapperX.vkCreateProtectedCommandPool(
                 vkDevice,                 protectedMemoryCapabilities.protectedQueueIndex);
         }
         
@@ -1886,21 +1886,21 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
          */
         
-        long bufferHandle = VulkanCallMapper.vkCreateProtectedBuffer(vkDevice, size, usage);
+        long bufferHandle = VulkanCallMapperX.vkCreateProtectedBuffer(vkDevice, size, usage);
         if (bufferHandle == VK_NULL_HANDLE) {
             throw new RuntimeException("Failed to create protected buffer");
         }
         
-        long memReqSize = VulkanCallMapper.vkGetBufferMemoryRequirements(vkDevice, bufferHandle);
+        long memReqSize = VulkanCallMapperX.vkGetBufferMemoryRequirements(vkDevice, bufferHandle);
         int memTypeIndex = findProtectedMemoryType();
         
-        long memoryHandle = VulkanCallMapper.vkAllocateProtectedMemory(vkDevice, memReqSize, memTypeIndex);
+        long memoryHandle = VulkanCallMapperX.vkAllocateProtectedMemory(vkDevice, memReqSize, memTypeIndex);
         if (memoryHandle == VK_NULL_HANDLE) {
-            VulkanCallMapper.vkDestroyBuffer(vkDevice, bufferHandle);
+            VulkanCallMapperX.vkDestroyBuffer(vkDevice, bufferHandle);
             throw new RuntimeException("Failed to allocate protected memory");
         }
         
-        VulkanCallMapper.vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
+        VulkanCallMapperX.vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
         
         // Protected buffers use device-local memory with protected bit
         int memProps = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_PROTECTED_BIT;
@@ -1951,7 +1951,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * vkQueueSubmit(protectedQueue, submitInfo, fence);
          */
         
-        VulkanCallMapper.vkQueueSubmitProtected(protectedQueue, commandBuffer, fence);
+        VulkanCallMapperX.vkQueueSubmitProtected(protectedQueue, commandBuffer, fence);
     }
     
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -2009,14 +2009,14 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * return pConversion.get(0);
          */
         
-        return VulkanCallMapper.vkCreateSamplerYcbcrConversion(vkDevice, config);
+        return VulkanCallMapperX.vkCreateSamplerYcbcrConversion(vkDevice, config);
     }
     
     /**
      * Destroy YCbCr conversion.
      */
     public void destroyYCbCrConversion(long conversion) {
-        VulkanCallMapper.vkDestroySamplerYcbcrConversion(vkDevice, conversion);
+        VulkanCallMapperX.vkDestroySamplerYcbcrConversion(vkDevice, conversion);
         ycbcrConversions.remove(conversion);
     }
     
@@ -2047,7 +2047,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * vkBindBufferMemory2(vkDevice, bindInfos);
          */
         
-        VulkanCallMapper.vkBindBufferMemory2(vkDevice, buffers, memories, offsets);
+        VulkanCallMapperX.vkBindBufferMemory2(vkDevice, buffers, memories, offsets);
     }
     
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -2091,7 +2091,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * result.requiresDedicatedAllocation = dedicatedReqs.requiresDedicatedAllocation();
          */
         
-        return VulkanCallMapper.vkGetBufferMemoryRequirements2(vkDevice, buffer);
+        return VulkanCallMapperX.vkGetBufferMemoryRequirements2(vkDevice, buffer);
     }
     
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -2134,7 +2134,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
     public DeviceIdProperties getDeviceIdProperties() {
         if (deviceIdProperties == null) {
             deviceIdProperties = new DeviceIdProperties();
-            VulkanCallMapper.vkGetPhysicalDeviceIdProperties(vkPhysicalDevice, deviceIdProperties);
+            VulkanCallMapperX.vkGetPhysicalDeviceIdProperties(vkPhysicalDevice, deviceIdProperties);
         }
         return deviceIdProperties;
     }
@@ -2169,7 +2169,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
      * Uses dedicated allocation when beneficial.
      */
     public int createOptimalBuffer(long size, int usage, int memoryProperties) {
-        long bufferHandle = VulkanCallMapper.vkCreateBuffer(vkDevice, size, usage);
+        long bufferHandle = VulkanCallMapperX.vkCreateBuffer(vkDevice, size, usage);
         if (bufferHandle == VK_NULL_HANDLE) return 0;
         
         // Get extended memory requirements
@@ -2181,19 +2181,19 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
         if (memReqs.requiresDedicatedAllocation || 
             (memReqs.prefersDedicatedAllocation && size >= 1024 * 1024)) {
             // Use dedicated allocation for large buffers or when required
-            memoryHandle = VulkanCallMapper.vkAllocateDedicatedMemory(
+            memoryHandle = VulkanCallMapperX.vkAllocateDedicatedMemory(
                 vkDevice, memReqs.size, memTypeIndex, bufferHandle, VK_NULL_HANDLE);
         } else {
             // Standard allocation
-            memoryHandle = VulkanCallMapper.vkAllocateMemory(vkDevice, memReqs.size, memTypeIndex);
+            memoryHandle = VulkanCallMapperX.vkAllocateMemory(vkDevice, memReqs.size, memTypeIndex);
         }
         
         if (memoryHandle == VK_NULL_HANDLE) {
-            VulkanCallMapper.vkDestroyBuffer(vkDevice, bufferHandle);
+            VulkanCallMapperX.vkDestroyBuffer(vkDevice, bufferHandle);
             return 0;
         }
         
-        VulkanCallMapper.vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
+        VulkanCallMapperX.vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
         
         VulkanBuffer buffer = new VulkanBuffer(bufferHandle, memoryHandle, size, usage, memoryProperties);
         
@@ -2259,21 +2259,21 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * return pSemaphore.get(0);
          */
         
-        return VulkanCallMapper.vkCreateExternalSemaphore(vkDevice, handleType);
+        return VulkanCallMapperX.vkCreateExternalSemaphore(vkDevice, handleType);
     }
     
     /**
      * Get external handle from semaphore.
      */
     public long getSemaphoreExternalHandle(long semaphore, int handleType) {
-        return VulkanCallMapper.vkGetSemaphoreExternalHandle(vkDevice, semaphore, handleType);
+        return VulkanCallMapperX.vkGetSemaphoreExternalHandle(vkDevice, semaphore, handleType);
     }
     
     /**
      * Import semaphore from external handle.
      */
     public long importExternalSemaphore(int handleType, long externalHandle) {
-        return VulkanCallMapper.vkImportExternalSemaphore(vkDevice, handleType, externalHandle);
+        return VulkanCallMapperX.vkImportExternalSemaphore(vkDevice, handleType, externalHandle);
     }
     
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -2299,21 +2299,21 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
          * return pFence.get(0);
          */
         
-        return VulkanCallMapper.vkCreateExternalFence(vkDevice, handleType, signaled);
+        return VulkanCallMapperX.vkCreateExternalFence(vkDevice, handleType, signaled);
     }
     
     /**
      * Get external handle from fence.
      */
     public long getFenceExternalHandle(long fence, int handleType) {
-        return VulkanCallMapper.vkGetFenceExternalHandle(vkDevice, fence, handleType);
+        return VulkanCallMapperX.vkGetFenceExternalHandle(vkDevice, fence, handleType);
     }
     
     /**
      * Import fence from external handle.
      */
     public long importExternalFence(int handleType, long externalHandle) {
-        return VulkanCallMapper.vkImportExternalFence(vkDevice, handleType, externalHandle);
+        return.VulkanCallMapperX.vkImportExternalFence(vkDevice, handleType, externalHandle);
     }
     
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -2326,19 +2326,19 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
      */
     public void trimCommandPool() {
         if (vkCommandPool != VK_NULL_HANDLE) {
-            VulkanCallMapper.vkTrimCommandPool(vkDevice, vkCommandPool, 0);
+            VulkanCallMapperX.vkTrimCommandPool(vkDevice, vkCommandPool, 0);
         }
         if (vkTransferCommandPool != VK_NULL_HANDLE) {
-            VulkanCallMapper.vkTrimCommandPool(vkDevice, vkTransferCommandPool, 0);
+            VulkanCallMapperX.vkTrimCommandPool(vkDevice, vkTransferCommandPool, 0);
         }
         if (protectedCommandPool != VK_NULL_HANDLE) {
-            VulkanCallMapper.vkTrimCommandPool(vkDevice, protectedCommandPool, 0);
+            VulkanCallMapperX.vkTrimCommandPool(vkDevice, protectedCommandPool, 0);
         }
         
         // Trim thread-local pools
         for (ThreadCommandPool pool : threadCommandPools.values()) {
             if (pool.commandPool != VK_NULL_HANDLE) {
-                VulkanCallMapper.vkTrimCommandPool(vkDevice, pool.commandPool, 0);
+                VulkanCallMapperX.vkTrimCommandPool(vkDevice, pool.commandPool, 0);
             }
         }
     }
@@ -2360,11 +2360,11 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
         // Create all buffers
         long[] bufferHandles = new long[sizes.length];
         for (int i = 0; i < sizes.length; i++) {
-            bufferHandles[i] = VulkanCallMapper.vkCreateBuffer(vkDevice, sizes[i], usages[i]);
+            bufferHandles[i] = VulkanCallMapperX.vkCreateBuffer(vkDevice, sizes[i], usages[i]);
             if (bufferHandles[i] == VK_NULL_HANDLE) {
                 // Cleanup already created
                 for (int j = 0; j < i; j++) {
-                    VulkanCallMapper.vkDestroyBuffer(vkDevice, bufferHandles[j]);
+                    VulkanCallMapperX.vkDestroyBuffer(vkDevice, bufferHandles[j]);
                 }
                 throw new RuntimeException("Failed to create buffer at index " + i);
             }
@@ -2373,20 +2373,20 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
         // Get memory requirements for all
         long[] memSizes = new long[sizes.length];
         for (int i = 0; i < sizes.length; i++) {
-            memSizes[i] = VulkanCallMapper.vkGetBufferMemoryRequirements(vkDevice, bufferHandles[i]);
+            memSizes[i] = VulkanCallMapperX.vkGetBufferMemoryRequirements(vkDevice, bufferHandles[i]);
         }
         
         // Allocate memory for all
         long[] memoryHandles = new long[sizes.length];
         for (int i = 0; i < sizes.length; i++) {
             int memTypeIndex = findMemoryType(memoryProperties[i]);
-            memoryHandles[i] = VulkanCallMapper.vkAllocateMemory(vkDevice, memSizes[i], memTypeIndex);
+            memoryHandles[i] = VulkanCallMapperX.vkAllocateMemory(vkDevice, memSizes[i], memTypeIndex);
         }
         
         // Bind all using vkBindBufferMemory2
         long[] offsets = new long[sizes.length];
         Arrays.fill(offsets, 0);
-        VulkanCallMapper.vkBindBufferMemory2(vkDevice, bufferHandles, memoryHandles, offsets);
+        VulkanCallMapperX.vkBindBufferMemory2(vkDevice, bufferHandles, memoryHandles, offsets);
         
         // Register all buffers
         for (int i = 0; i < sizes.length; i++) {
@@ -2423,15 +2423,15 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
         }
         
         // Wait for GPU to finish using these buffers
-        VulkanCallMapper.vkDeviceWaitIdle(vkDevice);
+        VulkanCallMapperX.vkDeviceWaitIdle(vkDevice);
         
         // Destroy all
         for (VulkanBuffer buffer : toDelete) {
             if (buffer.persistentMap != null) {
                 unmapMemory(buffer.memory);
             }
-            VulkanCallMapper.vkDestroyBuffer(vkDevice, buffer.handle);
-            VulkanCallMapper.vkFreeMemory(vkDevice, buffer.memory);
+            VulkanCallMapperX.vkDestroyBuffer(vkDevice, buffer.handle);
+            VulkanCallMapperX.vkFreeMemory(vkDevice, buffer.memory);
             
             STAT_BUFFERS_DESTROYED.incrementAndGet();
             STAT_BYTES_FREED.addAndGet(buffer.size);
@@ -2456,7 +2456,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
         long srcCmdBuffer = allocateCommandBuffer(vkCommandPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
         beginCommandBuffer(srcCmdBuffer, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
         
-        VulkanCallMapper.vkCmdPipelineBarrierQueueTransfer(
+        VulkanCallMapperX.vkCmdPipelineBarrierQueueTransfer(
             srcCmdBuffer,
             VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
             VK_ACCESS_MEMORY_WRITE_BIT, 0,
@@ -2475,7 +2475,7 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
         long dstCmdBuffer = allocateCommandBuffer(vkTransferCommandPool, VK_COMMAND_BUFFER_LEVEL_PRIMARY);
         beginCommandBuffer(dstCmdBuffer, VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
         
-        VulkanCallMapper.vkCmdPipelineBarrierQueueTransfer(
+        VulkanCallMapperX.vkCmdPipelineBarrierQueueTransfer(
             dstCmdBuffer,
             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
             0, VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
@@ -2591,34 +2591,34 @@ public class VulkanBufferOps11 extends VulkanBufferOps10 {
         
         // Destroy descriptor update templates
         for (Long handle : descriptorTemplates.keySet()) {
-            VulkanCallMapper.vkDestroyDescriptorUpdateTemplate(vkDevice, handle);
+            VulkanCallMapperX.vkDestroyDescriptorUpdateTemplate(vkDevice, handle);
         }
         descriptorTemplates.clear();
         
         while (!templatePool.isEmpty()) {
             Long handle = templatePool.poll();
             if (handle != null) {
-                VulkanCallMapper.vkDestroyDescriptorUpdateTemplate(vkDevice, handle);
+                VulkanCallMapperX.vkDestroyDescriptorUpdateTemplate(vkDevice, handle);
             }
         }
         
         // Destroy external memory handles
         for (ExternalMemoryHandle handle : externalHandles.values()) {
             // Note: Don't close the external handles - they may be in use by other APIs
-            VulkanCallMapper.vkDestroyBuffer(vkDevice, handle.vkBuffer);
-            VulkanCallMapper.vkFreeMemory(vkDevice, handle.vkMemory);
+            VulkanCallMapperX.vkDestroyBuffer(vkDevice, handle.vkBuffer);
+            VulkanCallMapperX.vkFreeMemory(vkDevice, handle.vkMemory);
         }
         externalHandles.clear();
         
         // Destroy YCbCr conversions
         for (Long conversion : ycbcrConversions.keySet()) {
-            VulkanCallMapper.vkDestroySamplerYcbcrConversion(vkDevice, conversion);
+            VulkanCallMapperX.vkDestroySamplerYcbcrConversion(vkDevice, conversion);
         }
         ycbcrConversions.clear();
         
         // Destroy protected command pool
         if (protectedCommandPool != VK_NULL_HANDLE) {
-            VulkanCallMapper.vkDestroyCommandPool(vkDevice, protectedCommandPool);
+            VulkanCallMapperX.vkDestroyCommandPool(vkDevice, protectedCommandPool);
             protectedCommandPool = VK_NULL_HANDLE;
         }
         
