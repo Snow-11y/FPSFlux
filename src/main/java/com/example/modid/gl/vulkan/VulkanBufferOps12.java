@@ -1,7 +1,7 @@
 package com.example.modid.gl.vulkan;
 
 import com.example.modid.gl.buffer.ops.BufferOps;
-import com.example.modid.gl.mapping.VulkanCallMapper;
+import com.example.modid.gl.mapping.VulkanCallMapperX;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -849,7 +849,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
          * vkGetPhysicalDeviceProperties2(vkPhysicalDevice, props2);
          */
         
-        VulkanCallMapper.vkGetVulkan12Features(vkPhysicalDevice, vulkan12Features);
+        VulkanCallMapperX.vkGetVulkan12Features(vkPhysicalDevice, vulkan12Features);
         
         System.out.println("[Vulkan 1.2] " + vulkan12Features);
         
@@ -873,7 +873,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
          *         .sType(VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES);
          */
         
-        VulkanCallMapper.vkGetDescriptorIndexingFeatures(vkPhysicalDevice, descriptorIndexingFeatures);
+        VulkanCallMapperX.vkGetDescriptorIndexingFeatures(vkPhysicalDevice, descriptorIndexingFeatures);
         
         System.out.println("[Vulkan 1.2] " + descriptorIndexingFeatures);
     }
@@ -916,7 +916,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
          * return pSemaphore.get(0);
          */
         
-        long handle = VulkanCallMapper.vkCreateTimelineSemaphore(vkDevice, initialValue);
+        long handle = VulkanCallMapperX.vkCreateTimelineSemaphore(vkDevice, initialValue);
         if (handle == VK_NULL_HANDLE) {
             throw new RuntimeException("Failed to create timeline semaphore");
         }
@@ -938,7 +938,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
          * return pValue.get(0);
          */
         
-        long value = VulkanCallMapper.vkGetSemaphoreCounterValue(vkDevice, semaphore.handle);
+        long value = VulkanCallMapperX.vkGetSemaphoreCounterValue(vkDevice, semaphore.handle);
         semaphore.updateCurrentValue(value);
         return value;
     }
@@ -963,7 +963,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
          */
         
         long startNs = System.nanoTime();
-        int result = VulkanCallMapper.vkWaitSemaphores(vkDevice, semaphore.handle, value, timeoutNs);
+        int result = VulkanCallMapperX.vkWaitSemaphores(vkDevice, semaphore.handle, value, timeoutNs);
         long waitTimeNs = System.nanoTime() - startNs;
         
         semaphore.recordWait(waitTimeNs);
@@ -1008,7 +1008,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
         }
         
         long startNs = System.nanoTime();
-        int result = VulkanCallMapper.vkWaitSemaphoresMultiple(
+        int result = VulkanCallMapperX.vkWaitSemaphoresMultiple(
             vkDevice, handles, values, waitAll, timeoutNs);
         long waitTimeNs = System.nanoTime() - startNs;
         
@@ -1034,7 +1034,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
          * vkSignalSemaphore(vkDevice, signalInfo);
          */
         
-        VulkanCallMapper.vkSignalSemaphore(vkDevice, semaphore.handle, value);
+        VulkanCallMapperX.vkSignalSemaphore(vkDevice, semaphore.handle, value);
         semaphore.updateCurrentValue(value);
         semaphore.recordSignal();
         STAT_TIMELINE_SIGNALS.incrementAndGet();
@@ -1068,7 +1068,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
          * vkQueueSubmit(queue, submitInfo, VK_NULL_HANDLE);
          */
         
-        VulkanCallMapper.vkQueueSubmitWithTimeline(
+        VulkanCallMapperX.vkQueueSubmitWithTimeline(
             queue, commandBuffer,
             waitSemaphore != null ? waitSemaphore.handle : VK_NULL_HANDLE, waitValue,
             signalSemaphore != null ? signalSemaphore.handle : VK_NULL_HANDLE, signalValue);
@@ -1085,7 +1085,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
     public void destroyTimelineSemaphore(TimelineSemaphore semaphore) {
         timelineSemaphores.remove(semaphore.handle);
         namedSemaphores.remove(semaphore.name);
-        VulkanCallMapper.vkDestroySemaphore(vkDevice, semaphore.handle);
+        VulkanCallMapperX.vkDestroySemaphore(vkDevice, semaphore.handle);
     }
     
     /**
@@ -1165,25 +1165,25 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
          * long deviceAddress = vkGetBufferDeviceAddress(vkDevice, addressInfo);
          */
         
-        long bufferHandle = VulkanCallMapper.vkCreateBuffer(vkDevice, size, usage);
+        long bufferHandle = VulkanCallMapperX.vkCreateBuffer(vkDevice, size, usage);
         if (bufferHandle == VK_NULL_HANDLE) return 0;
         
-        long memReqSize = VulkanCallMapper.vkGetBufferMemoryRequirements(vkDevice, bufferHandle);
+        long memReqSize = VulkanCallMapperX.vkGetBufferMemoryRequirements(vkDevice, bufferHandle);
         int memTypeIndex = findMemoryType(MEMORY_DEVICE_LOCAL);
         
         // Allocate with device address flag
-        long memoryHandle = VulkanCallMapper.vkAllocateMemoryWithDeviceAddress(
+        long memoryHandle = VulkanCallMapperX.vkAllocateMemoryWithDeviceAddress(
             vkDevice, memReqSize, memTypeIndex);
         
         if (memoryHandle == VK_NULL_HANDLE) {
-            VulkanCallMapper.vkDestroyBuffer(vkDevice, bufferHandle);
+            VulkanCallMapperX.vkDestroyBuffer(vkDevice, bufferHandle);
             return 0;
         }
         
-        VulkanCallMapper.vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
+        VulkanCallMapperX.vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
         
         // Get device address
-        long deviceAddress = VulkanCallMapper.vkGetBufferDeviceAddress(vkDevice, bufferHandle);
+        long deviceAddress = VulkanCallMapperX.vkGetBufferDeviceAddress(vkDevice, bufferHandle);
         
         BindlessBuffer buffer = new BindlessBuffer(
             bufferHandle, memoryHandle, size, usage, MEMORY_DEVICE_LOCAL,
@@ -1236,7 +1236,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
         }
         
         // Query device address
-        long address = VulkanCallMapper.vkGetBufferDeviceAddress(vkDevice, buffer.handle);
+        long address = VulkanCallMapperX.vkGetBufferDeviceAddress(vkDevice, buffer.handle);
         bufferAddressCache.put(buffer.handle, address);
         STAT_DEVICE_ADDRESS_QUERIES.incrementAndGet();
         
@@ -1252,7 +1252,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
             return cached;
         }
         
-        long address = VulkanCallMapper.vkGetBufferDeviceAddress(vkDevice, bufferHandle);
+        long address = VulkanCallMapperX.vkGetBufferDeviceAddress(vkDevice, bufferHandle);
         bufferAddressCache.put(bufferHandle, address);
         STAT_DEVICE_ADDRESS_QUERIES.incrementAndGet();
         
@@ -1357,7 +1357,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
                           VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
                           VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
         
-        return VulkanCallMapper.vkCreateBindlessDescriptorSetLayout(
+        return VulkanCallMapperX.vkCreateBindlessDescriptorSetLayout(
             vkDevice, descriptorType, maxDescriptors, bindingFlags);
     }
     
@@ -1382,7 +1382,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
          * return pPool.get(0);
          */
         
-        return VulkanCallMapper.vkCreateBindlessDescriptorPool(
+        return VulkanCallMapperX.vkCreateBindlessDescriptorPool(
             vkDevice, descriptorType, maxDescriptors, maxSets);
     }
     
@@ -1409,7 +1409,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
          * return pSet.get(0);
          */
         
-        return VulkanCallMapper.vkAllocateBindlessDescriptorSet(
+        return VulkanCallMapperX.vkAllocateBindlessDescriptorSet(
             vkDevice, pool, layout, actualDescriptorCount);
     }
     
@@ -1532,7 +1532,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
          * return pPool.get(0);
          */
         
-        long handle = VulkanCallMapper.vkCreateQueryPool(vkDevice, queryType, queryCount, pipelineStats);
+        long handle = VulkanCallMapperX.vkCreateQueryPool(vkDevice, queryType, queryCount, pipelineStats);
         if (handle == VK_NULL_HANDLE) return null;
         
         HostResetQueryPool pool = new HostResetQueryPool(handle, queryType, queryCount, pipelineStats);
@@ -1554,7 +1554,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
          * vkResetQueryPool(vkDevice, pool.handle, firstQuery, queryCount);
          */
         
-        VulkanCallMapper.vkResetQueryPool(vkDevice, pool.handle, firstQuery, queryCount);
+        VulkanCallMapperX.vkResetQueryPool(vkDevice, pool.handle, firstQuery, queryCount);
         pool.markReset(firstQuery, queryCount);
         STAT_HOST_QUERY_RESETS.incrementAndGet();
     }
@@ -1564,7 +1564,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
      */
     public void destroyQueryPool(HostResetQueryPool pool) {
         queryPools.remove(pool.handle);
-        VulkanCallMapper.vkDestroyQueryPool(vkDevice, pool.handle);
+        VulkanCallMapperX.vkDestroyQueryPool(vkDevice, pool.handle);
     }
     
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -1633,7 +1633,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
          *     maxDrawCount, stride);
          */
         
-        VulkanCallMapper.vkCmdDrawIndexedIndirectCount(
+        VulkanCallMapperX.vkCmdDrawIndexedIndirectCount(
             commandBuffer, drawBuffer, drawOffset, countBuffer, countOffset, maxDrawCount, stride);
         STAT_DRAW_INDIRECT_COUNT_CALLS.incrementAndGet();
     }
@@ -1653,7 +1653,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
          *     maxDrawCount, stride);
          */
         
-        VulkanCallMapper.vkCmdDrawIndirectCount(
+        VulkanCallMapperX.vkCmdDrawIndirectCount(
             commandBuffer, drawBuffer, drawOffset, countBuffer, countOffset, maxDrawCount, stride);
         STAT_DRAW_INDIRECT_COUNT_CALLS.incrementAndGet();
     }
@@ -1795,7 +1795,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
             throw new UnsupportedOperationException("Sampler filter minmax not supported");
         }
         
-        return VulkanCallMapper.vkCreateReductionSampler(vkDevice, VK_SAMPLER_REDUCTION_MODE_MIN);
+        return VulkanCallMapperX.vkCreateReductionSampler(vkDevice, VK_SAMPLER_REDUCTION_MODE_MIN);
     }
     
     /**
@@ -1806,7 +1806,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
             throw new UnsupportedOperationException("Sampler filter minmax not supported");
         }
         
-        return VulkanCallMapper.vkCreateReductionSampler(vkDevice, VK_SAMPLER_REDUCTION_MODE_MAX);
+        return VulkanCallMapperX.vkCreateReductionSampler(vkDevice, VK_SAMPLER_REDUCTION_MODE_MAX);
     }
     
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -2063,7 +2063,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
      */
     public DepthStencilResolve getDepthStencilResolve() {
         if (depthStencilResolve == null) {
-            int[] modes = VulkanCallMapper.vkGetDepthStencilResolveProperties(vkPhysicalDevice);
+            int[] modes = VulkanCallMapperX.vkGetDepthStencilResolveProperties(vkPhysicalDevice);
             if (modes != null && modes.length >= 4) {
                 depthStencilResolve = new DepthStencilResolve(
                     modes[0], modes[1], modes[2] != 0, modes[3] != 0);
@@ -2121,7 +2121,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
             signalHandles[i] = signalSemaphores[i].handle;
         }
         
-        VulkanCallMapper.vkQueueSubmitBatchWithTimeline(
+        VulkanCallMapperX.vkQueueSubmitBatchWithTimeline(
             queue, commandBuffers,
             waitHandles, waitValues, waitStages,
             signalHandles, signalValues);
@@ -2200,25 +2200,25 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
          *     .usage(usage);
          */
         
-        long bufferHandle = VulkanCallMapper.vkCreateCaptureReplayBuffer(
+        long bufferHandle = VulkanCallMapperX.vkCreateCaptureReplayBuffer(
             vkDevice, size, usage, captureAddress);
         
         if (bufferHandle == VK_NULL_HANDLE) return 0;
         
-        long memReqSize = VulkanCallMapper.vkGetBufferMemoryRequirements(vkDevice, bufferHandle);
+        long memReqSize = VulkanCallMapperX.vkGetBufferMemoryRequirements(vkDevice, bufferHandle);
         int memTypeIndex = findMemoryType(MEMORY_DEVICE_LOCAL);
         
-        long memoryHandle = VulkanCallMapper.vkAllocateMemoryWithCaptureReplay(
+        long memoryHandle = VulkanCallMapperX.vkAllocateMemoryWithCaptureReplay(
             vkDevice, memReqSize, memTypeIndex, captureAddress);
         
         if (memoryHandle == VK_NULL_HANDLE) {
-            VulkanCallMapper.vkDestroyBuffer(vkDevice, bufferHandle);
+            VulkanCallMapperX.vkDestroyBuffer(vkDevice, bufferHandle);
             return 0;
         }
         
-        VulkanCallMapper.vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
+        VulkanCallMapperX.vkBindBufferMemory(vkDevice, bufferHandle, memoryHandle, 0);
         
-        long deviceAddress = VulkanCallMapper.vkGetBufferDeviceAddress(vkDevice, bufferHandle);
+        long deviceAddress = VulkanCallMapperX.vkGetBufferDeviceAddress(vkDevice, bufferHandle);
         
         BindlessBuffer buffer = new BindlessBuffer(
             bufferHandle, memoryHandle, size, usage, MEMORY_DEVICE_LOCAL,
@@ -2246,7 +2246,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
             return ((BindlessBuffer) buffer).captureAddress;
         }
         
-        return VulkanCallMapper.vkGetBufferOpaqueCaptureAddress(vkDevice, buffer.handle);
+        return VulkanCallMapperX.vkGetBufferOpaqueCaptureAddress(vkDevice, buffer.handle);
     }
     
     // ═══════════════════════════════════════════════════════════════════════════════
@@ -2432,7 +2432,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
         
         // Destroy timeline semaphores
         for (TimelineSemaphore sem : timelineSemaphores.values()) {
-            VulkanCallMapper.vkDestroySemaphore(vkDevice, sem.handle);
+            VulkanCallMapperX.vkDestroySemaphore(vkDevice, sem.handle);
         }
         timelineSemaphores.clear();
         namedSemaphores.clear();
@@ -2442,7 +2442,7 @@ public class VulkanBufferOps12 extends VulkanBufferOps11 {
         
         // Destroy query pools
         for (HostResetQueryPool pool : queryPools.values()) {
-            VulkanCallMapper.vkDestroyQueryPool(vkDevice, pool.handle);
+            VulkanCallMapperX.vkDestroyQueryPool(vkDevice, pool.handle);
         }
         queryPools.clear();
         
