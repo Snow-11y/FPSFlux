@@ -3,7 +3,7 @@ package com.example.modid.gl;
 import com.example.modid.FPSFlux;
 import com.example.modid.gl.mapping.VulkanCallMapperX;
 import com.example.modid.gl.vulkan.VulkanContext;
-import com.example.modid.gl.vulkan.VulkanManager;
+import com.example.modid.gl.VulkanManager;
 
 import java.lang.foreign.*;
 import java.nio.ByteBuffer;
