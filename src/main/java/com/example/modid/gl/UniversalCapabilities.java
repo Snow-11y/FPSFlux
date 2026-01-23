@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
  * - OpenGL ES 1.0 - 3.2
  * - GLSL 1.10 - 4.60
  * - GLSL ES 1.00 - 3.20
+ * - Metal 1.00 - 3.20
  * - SPIR-V 1.0 - 1.6
  * - Vulkan 1.0 - 1.4
  * 
@@ -31,6 +32,7 @@ public class UniversalCapabilities {
     
     private static boolean initialized = false;
     private static boolean vulkanInitialized = false;
+    private static boolean metalInitialized = false;
     private static final Object initLock = new Object();
     
     //===========================================================================================================
@@ -44,6 +46,7 @@ public class UniversalCapabilities {
             OPENGL,         // Force OpenGL
             OPENGL_ES,      // Force OpenGL ES
             VULKAN,         // Force Vulkan
+            METAL,          // Force Metal (macOS/iOS)
             OPENGL_COMPAT,  // OpenGL Compatibility Profile
             OPENGL_CORE     // OpenGL Core Profile
         }
@@ -95,7 +98,12 @@ public class UniversalCapabilities {
         public int minSPIRVMinor = 0;
         public int maxSPIRVMajor = 1;
         public int maxSPIRVMinor = 6;
-        
+
+        public int minMetalMajor = 1;
+        public int minMetalMinor = 0;
+        public int maxMetalMajor = 3;
+        public int maxMetalMinor = 2;
+
         // Feature toggles
         public FeatureLevel useVBO = FeatureLevel.AUTO;
         public FeatureLevel useVAO = FeatureLevel.AUTO;
@@ -134,6 +142,13 @@ public class UniversalCapabilities {
         public boolean emulateModernGL = false;
         public boolean trustDriverVersion = true;
         
+        // Metal feature toggles
+        public FeatureLevel useMetal = FeatureLevel.AUTO;
+        public FeatureLevel useMetalRayTracing = FeatureLevel.AUTO;
+        public FeatureLevel useMetalMeshShaders = FeatureLevel.AUTO;
+        public FeatureLevel useArgumentBuffers = FeatureLevel.AUTO;
+        public FeatureLevel useICB = FeatureLevel.AUTO;  // Indirect Command Buffers
+        
         // Wrapper-specific overrides
         public Map<String, Map<String, Object>> wrapperOverrides = new HashMap<>();
         
@@ -171,6 +186,11 @@ public class UniversalCapabilities {
             maxVulkanMajor = getInt(properties, "maxVulkanMajor", maxVulkanMajor);
             maxVulkanMinor = getInt(properties, "maxVulkanMinor", maxVulkanMinor);
             
+            minMetalMajor = getInt(properties, "minMetalMajor", minMetalMajor);
+            minMetalMinor = getInt(properties, "minMetalMinor", minMetalMinor);
+            maxMetalMajor = getInt(properties, "maxMetalMajor", maxMetalMajor);
+            maxMetalMinor = getInt(properties, "maxMetalMinor", maxMetalMinor);
+            
             // Feature levels
             useVBO = getFeatureLevel(properties, "useVBO", useVBO);
             useVAO = getFeatureLevel(properties, "useVAO", useVAO);
@@ -188,6 +208,11 @@ public class UniversalCapabilities {
             useSparseTextures = getFeatureLevel(properties, "useSparseTextures", useSparseTextures);
             useMeshShaders = getFeatureLevel(properties, "useMeshShaders", useMeshShaders);
             useRayTracing = getFeatureLevel(properties, "useRayTracing", useRayTracing);
+            useMetal = getFeatureLevel(properties, "useMetal", useMetal);
+            useMetalRayTracing = getFeatureLevel(properties, "useMetalRayTracing", useMetalRayTracing);
+            useMetalMeshShaders = getFeatureLevel(properties, "useMetalMeshShaders", useMetalMeshShaders);
+            useArgumentBuffers = getFeatureLevel(properties, "useArgumentBuffers", useArgumentBuffers);
+            useICB = getFeatureLevel(properties, "useICB", useICB);
             
             // Booleans
             preferBatching = getBool(properties, "preferBatching", preferBatching);
@@ -231,6 +256,16 @@ public class UniversalCapabilities {
             map.put("minVulkanMinor", minVulkanMinor);
             map.put("maxVulkanMajor", maxVulkanMajor);
             map.put("maxVulkanMinor", maxVulkanMinor);
+            
+            map.put("minMetalMajor", minMetalMajor);
+            map.put("minMetalMinor", minMetalMinor);
+            map.put("maxMetalMajor", maxMetalMajor);
+            map.put("maxMetalMinor", maxMetalMinor);
+            map.put("useMetal", useMetal.name());
+            map.put("useMetalRayTracing", useMetalRayTracing.name());
+            map.put("useMetalMeshShaders", useMetalMeshShaders.name());
+            map.put("useArgumentBuffers", useArgumentBuffers.name());
+            map.put("useICB", useICB.name());
             
             map.put("useVBO", useVBO.name());
             map.put("useVAO", useVAO.name());
@@ -685,6 +720,425 @@ public class UniversalCapabilities {
     }
     
     //===========================================================================================================
+    // METAL VERSIONS - 1.0 to 3.2 (macOS/iOS/iPadOS/tvOS/visionOS)
+    //===========================================================================================================
+    
+    public static final class Metal {
+        
+        // Metal versions
+        public static boolean MTL10 = false;    // 2014 - iOS 8, OS X 10.11 El Capitan
+        public static boolean MTL11 = false;    // 2015 - iOS 9, OS X 10.11.4
+        public static boolean MTL12 = false;    // 2016 - iOS 10, macOS 10.12 Sierra
+        public static boolean MTL20 = false;    // 2017 - iOS 11, macOS 10.13 High Sierra
+        public static boolean MTL21 = false;    // 2018 - iOS 12, macOS 10.14 Mojave
+        public static boolean MTL22 = false;    // 2019 - iOS 13, macOS 10.15 Catalina
+        public static boolean MTL23 = false;    // 2020 - iOS 14, macOS 11 Big Sur
+        public static boolean MTL24 = false;    // 2021 - iOS 15, macOS 12 Monterey
+        public static boolean MTL30 = false;    // 2022 - iOS 16, macOS 13 Ventura
+        public static boolean MTL31 = false;    // 2023 - iOS 17, macOS 14 Sonoma
+        public static boolean MTL32 = false;    // 2024 - iOS 18, macOS 15 Sequoia
+        
+        // Availability
+        public static boolean isAvailable = false;
+        public static boolean isNative = false;         // Running on actual Apple hardware
+        public static boolean isTranslated = false;     // Running via MoltenVK/MoltenGL
+        
+        // Version info
+        public static int majorVersion = 0;
+        public static int minorVersion = 0;
+        public static int patchVersion = 0;
+        public static String versionString = "";
+        
+        // Device info
+        public static String deviceName = "";
+        public static String registryID = "";
+        public static int vendorID = 0;
+        public static int deviceID = 0;
+        public static boolean isLowPower = false;       // Integrated GPU
+        public static boolean isHeadless = false;       // No display attached
+        public static boolean isRemovable = false;      // eGPU
+        public static boolean hasUnifiedMemory = false; // Apple Silicon
+        
+        // GPU Family (Apple GPU generations)
+        public enum GPUFamily {
+            UNKNOWN,
+            // iOS/tvOS GPU Families
+            APPLE1,         // A7 (iPhone 5s, iPad Air)
+            APPLE2,         // A8 (iPhone 6, iPad mini 4)
+            APPLE3,         // A9/A10 (iPhone 6s-7, iPad 2017)
+            APPLE4,         // A11 (iPhone 8/X)
+            APPLE5,         // A12 (iPhone XS/XR, iPad 2019)
+            APPLE6,         // A13 (iPhone 11)
+            APPLE7,         // A14/M1 (iPhone 12, iPad Air 4, M1 Macs)
+            APPLE8,         // A15/M2 (iPhone 13-14, M2 Macs)
+            APPLE9,         // A16/A17/M3 (iPhone 15, M3 Macs)
+            // macOS GPU Families
+            MAC1,           // Intel-based Macs (various)
+            MAC2,           // Apple Silicon Macs (M1+)
+            // Common families
+            COMMON1,
+            COMMON2,
+            COMMON3,
+            // Metal 3 families
+            METAL3
+        }
+        
+        public static GPUFamily gpuFamily = GPUFamily.UNKNOWN;
+        public static final Set<GPUFamily> supportedFamilies = new HashSet<>();
+        
+        // Feature Sets (legacy, pre-Metal 3)
+        public enum FeatureSet {
+            UNKNOWN,
+            // iOS Feature Sets
+            IOS_GPUFAMILY1_V1,  IOS_GPUFAMILY1_V2,  IOS_GPUFAMILY1_V3,  IOS_GPUFAMILY1_V4,  IOS_GPUFAMILY1_V5,
+            IOS_GPUFAMILY2_V1,  IOS_GPUFAMILY2_V2,  IOS_GPUFAMILY2_V3,  IOS_GPUFAMILY2_V4,  IOS_GPUFAMILY2_V5,
+            IOS_GPUFAMILY3_V1,  IOS_GPUFAMILY3_V2,  IOS_GPUFAMILY3_V3,  IOS_GPUFAMILY3_V4,
+            IOS_GPUFAMILY4_V1,  IOS_GPUFAMILY4_V2,
+            IOS_GPUFAMILY5_V1,
+            // macOS Feature Sets
+            MACOS_GPUFAMILY1_V1, MACOS_GPUFAMILY1_V2, MACOS_GPUFAMILY1_V3, MACOS_GPUFAMILY1_V4,
+            MACOS_GPUFAMILY2_V1,
+            // tvOS Feature Sets
+            TVOS_GPUFAMILY1_V1, TVOS_GPUFAMILY1_V2, TVOS_GPUFAMILY1_V3, TVOS_GPUFAMILY1_V4,
+            TVOS_GPUFAMILY2_V1, TVOS_GPUFAMILY2_V2
+        }
+        
+        public static FeatureSet highestFeatureSet = FeatureSet.UNKNOWN;
+        public static final Set<FeatureSet> supportedFeatureSets = new HashSet<>();
+        
+        // Platform
+        public enum Platform {
+            UNKNOWN,
+            MACOS,
+            IOS,
+            IPADOS,
+            TVOS,
+            VISIONOS,
+            SIMULATOR
+        }
+        
+        public static Platform platform = Platform.UNKNOWN;
+        public static String osVersion = "";
+        
+        // Metal Shading Language (MSL) Version
+        public static int mslMajorVersion = 0;
+        public static int mslMinorVersion = 0;
+        public static int mslPatchVersion = 0;
+        
+        // MSL versions
+        public static boolean MSL_10 = false;   // Metal 1.0
+        public static boolean MSL_11 = false;   // Metal 1.1
+        public static boolean MSL_12 = false;   // Metal 1.2
+        public static boolean MSL_20 = false;   // Metal 2.0
+        public static boolean MSL_21 = false;   // Metal 2.1
+        public static boolean MSL_22 = false;   // Metal 2.2
+        public static boolean MSL_23 = false;   // Metal 2.3
+        public static boolean MSL_24 = false;   // Metal 2.4
+        public static boolean MSL_30 = false;   // Metal 3.0
+        public static boolean MSL_31 = false;   // Metal 3.1
+        public static boolean MSL_32 = false;   // Metal 3.2
+        
+        // Shader compilation
+        public static boolean hasMetalLibrary = false;          // Precompiled .metallib support
+        public static boolean hasDynamicLibrary = false;        // Dynamic Metal library
+        public static boolean hasBinaryArchive = false;         // Binary archive (Metal 3)
+        public static boolean hasShaderValidation = false;
+        
+        // Argument Buffers (Bindless)
+        public static boolean hasArgumentBuffers = false;       // Metal 2.0+
+        public static int argumentBuffersTier = 0;              // 1 or 2
+        
+        // Texture features
+        public static boolean hasReadWriteTextures = false;
+        public static int readWriteTextureTier = 0;             // 1 or 2
+        public static boolean hasSparseTextures = false;        // Metal 2.2+
+        public static boolean hasSparseColorTextures = false;
+        public static boolean hasSparseDepthTextures = false;
+        public static boolean hasLosslessCompression = false;   // Apple Silicon
+        public static boolean hasBC_Compression = false;        // BC texture compression (macOS)
+        public static boolean hasASTC_Compression = false;      // ASTC (iOS/Apple Silicon)
+        public static boolean hasETC2_Compression = false;      // ETC2 (iOS)
+        public static boolean hasPVRTC_Compression = false;     // PVRTC (older iOS)
+        public static boolean has32BitMSAA = false;
+        public static boolean has32BitFloatFiltering = false;
+        public static boolean hasBCPixelFormats = false;
+        public static boolean hasDepth24Stencil8 = false;       // macOS only
+        
+        // Render features
+        public static boolean hasRasterOrderGroups = false;     // Metal 2.0+ (fragment shader ordering)
+        public static boolean hasTileShaders = false;           // Metal 2.0+ (iOS TBDR)
+        public static boolean hasImageBlocks = false;           // Metal 2.0+ (iOS)
+        public static boolean hasMSAALayeredRendering = false;
+        public static boolean hasLayeredRendering = false;
+        public static boolean hasMultisampleLayeredRendering = false;
+        public static boolean hasQuadScopedPermute = false;     // Quad shuffle operations
+        public static boolean hasSIMDPermute = false;           // SIMD shuffle operations
+        public static boolean hasSIMDReduction = false;         // SIMD reduction operations
+        public static boolean hasNonUniformThreadgroups = false;
+        public static boolean hasPrimitiveMotionBlur = false;   // Metal 3
+        
+        // Programmable sample positions
+        public static boolean hasProgrammableSamplePositions = false;
+        public static int maxSamplePositions = 0;
+        
+        // Indirect rendering
+        public static boolean hasIndirectCommandBuffers = false;    // ICBs
+        public static boolean hasIndirectComputeCommand = false;
+        public static boolean hasIndirectRenderCommand = false;
+        public static int maxIndirectCommandBufferSize = 0;
+        
+        // Ray Tracing (Metal 3+)
+        public static boolean hasRayTracing = false;
+        public static boolean hasRayTracingFromRender = false;  // Ray tracing from render pipeline
+        public static boolean hasIntersectionFunctions = false;
+        public static boolean hasAccelerationStructure = false;
+        public static boolean hasInstanceAccelerationStructure = false;
+        public static boolean hasPrimitiveAccelerationStructure = false;
+        public static boolean hasRayTracingMotionBlur = false;
+        
+        // Mesh Shaders (Metal 3+)
+        public static boolean hasMeshShaders = false;
+        public static boolean hasObjectShaders = false;         // Object stage
+        public static boolean hasMeshStage = false;             // Mesh stage
+        
+        // Compute features
+        public static boolean hasComputeShaders = false;
+        public static boolean hasNonSquareDispatch = false;
+        public static boolean hasMemoryBarriers = false;
+        public static boolean hasThreadgroupMemory = false;
+        public static int maxTotalThreadsPerThreadgroup = 0;
+        public static int[] maxThreadsPerThreadgroup = new int[3];
+        public static int maxThreadgroupMemoryLength = 0;
+        
+        // Vertex/Fragment features
+        public static boolean hasVertexAmplification = false;
+        public static boolean hasViewportArrays = false;
+        public static boolean hasBaseVertex = false;
+        public static boolean hasBaseInstance = false;
+        public static boolean hasDrawIndirect = false;
+        public static boolean hasInstancedDrawing = false;
+        public static boolean hasCombinedMSAAStore = false;
+        public static boolean hasDeferredStore = false;
+        public static boolean hasMaxVertexAmplification = false;
+        public static int maxVertexAmplificationCount = 0;
+        
+        // Sampler features
+        public static int maxSamplerStates = 0;
+        public static boolean hasSamplerCompare = false;
+        public static boolean hasSamplerLodClamp = false;
+        public static boolean hasSamplerBorderColor = false;
+        public static float maxAnisotropy = 0;
+        
+        // Buffer features
+        public static boolean hasBufferAtomics = false;
+        public static boolean hasBufferAtomics64 = false;
+        public static boolean hasSharedEventMemory = false;
+        public static long maxBufferLength = 0;
+        
+        // Memory features
+        public static boolean hasMemorylessRenderTargets = false;   // iOS TBDR
+        public static boolean hasResourceHeaps = false;             // Metal 2.0+
+        public static boolean hasFunctionPointers = false;          // Metal 2.1+
+        public static boolean hasPlacementHeaps = false;            // Metal 3
+        public static long recommendedMaxWorkingSetSize = 0;
+        public static long currentAllocatedSize = 0;
+        public static boolean hasPageableResources = false;
+        public static boolean hasResidencyTracking = false;
+        
+        // Synchronization
+        public static boolean hasEvents = false;
+        public static boolean hasSharedEvents = false;
+        public static boolean hasFences = false;
+        
+        // Debug features
+        public static boolean hasGPUCaptureScope = false;
+        public static boolean hasShaderDebugger = false;
+        public static boolean hasGPUTimestamps = false;
+        public static boolean hasCounterSampling = false;
+        public static boolean hasShaderProfiler = false;
+        
+        // HDR & Display
+        public static boolean hasEDR = false;                   // Extended Dynamic Range
+        public static boolean hasHDRRendering = false;
+        public static boolean hasWideColorGamut = false;
+        
+        // Neural Engine (ANE) Integration
+        public static boolean hasNeuralEngine = false;
+        public static boolean hasMLCompute = false;             // ML Compute framework
+        public static boolean hasMPSGraphIntegration = false;   // Metal Performance Shaders Graph
+        
+        // Extension support set
+        public static final Set<String> extensions = new HashSet<>();
+        public static int extensionCount = 0;
+        
+        // Limits
+        public static int maxTextureSize1D = 0;
+        public static int maxTextureSize2D = 0;
+        public static int maxTextureSize3D = 0;
+        public static int maxTextureSizeCube = 0;
+        public static int maxTextureArrayLayers = 0;
+        public static int maxTextureSampleCount = 0;
+        public static int maxColorRenderTargets = 0;
+        public static int maxFragmentInputs = 0;
+        public static int maxVertexAttributes = 0;
+        public static int maxBufferArgumentTableEntries = 0;
+        public static int maxTextureArgumentTableEntries = 0;
+        public static int maxSamplerArgumentTableEntries = 0;
+        public static int maxThreadgroupMemorySize = 0;
+        public static int maxTotalThreadsPerDispatch = 0;
+        public static int maxSIMDWidth = 0;                     // 32 on Apple Silicon
+        
+        // Per-stage limits
+        public static int maxVertexBuffers = 0;
+        public static int maxFragmentBuffers = 0;
+        public static int maxComputeBuffers = 0;
+        public static int maxVertexTextures = 0;
+        public static int maxFragmentTextures = 0;
+        public static int maxComputeTextures = 0;
+        public static int maxVertexSamplers = 0;
+        public static int maxFragmentSamplers = 0;
+        public static int maxComputeSamplers = 0;
+        
+        /**
+         * Get Metal version as combined integer (e.g., 31 for Metal 3.1)
+         */
+        public static int getVersionInt() {
+            return majorVersion * 10 + minorVersion;
+        }
+        
+        /**
+         * Get MSL version as combined integer (e.g., 31 for MSL 3.1)
+         */
+        public static int getMSLVersionInt() {
+            return mslMajorVersion * 10 + mslMinorVersion;
+        }
+        
+        /**
+         * Check if a specific Metal version is supported
+         */
+        public static boolean isVersionSupported(int major, int minor) {
+            if (!isAvailable) return false;
+            int target = major * 10 + minor;
+            int current = getVersionInt();
+            return current >= target;
+        }
+        
+        /**
+         * Check if a specific MSL version is supported
+         */
+        public static boolean isMSLVersionSupported(int major, int minor) {
+            if (!isAvailable) return false;
+            int target = major * 10 + minor;
+            int current = getMSLVersionInt();
+            return current >= target;
+        }
+        
+        /**
+         * Check if GPU family is supported
+         */
+        public static boolean supportsFamily(GPUFamily family) {
+            return supportedFamilies.contains(family);
+        }
+        
+        /**
+         * Check if feature set is supported
+         */
+        public static boolean supportsFeatureSet(FeatureSet featureSet) {
+            return supportedFeatureSets.contains(featureSet);
+        }
+        
+        /**
+         * Check extension support
+         */
+        public static boolean hasExtension(String name) {
+            return extensions.contains(name);
+        }
+        
+        /**
+         * Get platform name
+         */
+        public static String getPlatformName() {
+            switch (platform) {
+                case MACOS: return "macOS";
+                case IOS: return "iOS";
+                case IPADOS: return "iPadOS";
+                case TVOS: return "tvOS";
+                case VISIONOS: return "visionOS";
+                case SIMULATOR: return "Simulator";
+                default: return "Unknown";
+            }
+        }
+        
+        /**
+         * Get GPU family name
+         */
+        public static String getGPUFamilyName() {
+            switch (gpuFamily) {
+                case APPLE1: return "Apple A7 (Apple1)";
+                case APPLE2: return "Apple A8 (Apple2)";
+                case APPLE3: return "Apple A9/A10 (Apple3)";
+                case APPLE4: return "Apple A11 (Apple4)";
+                case APPLE5: return "Apple A12 (Apple5)";
+                case APPLE6: return "Apple A13 (Apple6)";
+                case APPLE7: return "Apple A14/M1 (Apple7)";
+                case APPLE8: return "Apple A15/M2 (Apple8)";
+                case APPLE9: return "Apple A16/M3 (Apple9)";
+                case MAC1: return "Mac (Intel)";
+                case MAC2: return "Mac (Apple Silicon)";
+                case COMMON1: return "Common Tier 1";
+                case COMMON2: return "Common Tier 2";
+                case COMMON3: return "Common Tier 3";
+                case METAL3: return "Metal 3 Family";
+                default: return "Unknown";
+            }
+        }
+        
+        /**
+         * Check if running on Apple Silicon
+         */
+        public static boolean isAppleSilicon() {
+            return hasUnifiedMemory && 
+                   (gpuFamily == GPUFamily.APPLE7 || 
+                    gpuFamily == GPUFamily.APPLE8 || 
+                    gpuFamily == GPUFamily.APPLE9 ||
+                    gpuFamily == GPUFamily.MAC2);
+        }
+        
+        /**
+         * Check if device supports modern Metal (Metal 2.0+)
+         */
+        public static boolean supportsModernMetal() {
+            return MTL20 && hasArgumentBuffers;
+        }
+        
+        /**
+         * Check if device supports Metal 3 features
+         */
+        public static boolean supportsMetal3Features() {
+            return MTL30 && hasMeshShaders && hasRayTracing;
+        }
+        
+        /**
+         * Get recommended render tier for this Metal device
+         */
+        public static Config.RenderTier getRecommendedTier() {
+            if (MTL30 && isAppleSilicon()) {
+                return Config.RenderTier.ULTRA;
+            }
+            if (MTL20 && argumentBuffersTier >= 2) {
+                return Config.RenderTier.HIGH;
+            }
+            if (MTL12) {
+                return Config.RenderTier.MEDIUM;
+            }
+            if (MTL10) {
+                return Config.RenderTier.LOW;
+            }
+            return Config.RenderTier.POTATO;
+        }
+    }
+
+    //===========================================================================================================
     // VULKAN VERSIONS - 1.0 to 1.4
     //===========================================================================================================
     
@@ -942,20 +1396,21 @@ public class UniversalCapabilities {
     // WRAPPER DETECTION (gl4es, ANGLE, Mesa, Zink, VirGL, etc.)
     //===========================================================================================================
     
-    public static final class Wrapper {
         public enum Type {
-            NATIVE,           // Native driver
-            GL4ES,            // gl4es (GLES to GL wrapper)
-            ANGLE,            // ANGLE (D3D/Vulkan to GL)
-            MESA_SOFTWARE,    // Mesa LLVMpipe/Softpipe
-            MESA_ZINK,        // Mesa Zink (Vulkan backend)
-            VIRGL,            // VirGL (Virtualized)
-            DXVK,             // DXVK-OpenGL (D3D to Vulkan)
-            MGL,              // MoltenGL (Metal to GL)
-            APITRACE,         // API tracing layer
-            RENDERDOC,        // RenderDoc capture
-            WINE,             // Wine/Proton
-            UNKNOWN           // Unknown wrapper
+            NATIVE,         // Native driver
+            GL4ES,          // gl4es (GLES to GL wrapper)
+            ANGLE,          // ANGLE (D3D/Vulkan to GL)
+            MESA_SOFTWARE,  // Mesa LLVMpipe/Softpipe
+            MESA_ZINK,      // Mesa Zink (Vulkan backend)
+            VIRGL,          // VirGL (Virtualized)
+            DXVK,           // DXVK-OpenGL (D3D to Vulkan)
+            MGL,            // MoltenGL (Metal to GL)
+            MVK,            // MoltenVK (Metal to Vulkan)
+            APITRACE,       // API tracing layer
+            RENDERDOC,      // RenderDoc capture
+            WINE,           // Wine/Proton
+            GPTK,           // Game Porting Toolkit (Apple)
+            UNKNOWN         // Unknown wrapper
         }
         
         public static Type type = Type.NATIVE;
@@ -966,6 +1421,9 @@ public class UniversalCapabilities {
         public static boolean isVirtualized = false;
         public static boolean isSoftware = false;
         public static boolean isTranslated = false;
+        public static boolean isMetal = false;              // Running on Metal backend
+        public static boolean isMoltenVK = false;           // MoltenVK translation layer
+        public static boolean isMoltenGL = false;           // MoltenGL translation layer
         
         // Wrapper quirks
         public static boolean quirk_brokenDSA = false;
@@ -1022,6 +1480,11 @@ public class UniversalCapabilities {
         public static boolean meshShaders = false;
         public static boolean taskShaders = false;
         public static boolean rayTracingShaders = false;
+        public static boolean metalArgumentBuffers = false;
+        public static boolean metalICB = false;
+        public static boolean metalTileShaders = false;
+        public static boolean metalMeshShaders = false;
+        public static boolean metalRayTracing = false;
         
         // Shader language features
         public static boolean glsl = false;
@@ -1285,10 +1748,11 @@ public class UniversalCapabilities {
     public static void detect() {
         synchronized (initLock) {
             if (initialized) return;
-            
             try {
                 detectOpenGL();
                 detectVulkan();
+                detectMetal();
+                detectOpenGL_ES();
                 resolveFeatures();
                 initialized = true;
             } catch (Exception e) {
@@ -1972,6 +2436,451 @@ public class UniversalCapabilities {
             Vulkan.isAvailable = false;
         }
     }
+
+    //===========================================================================================================
+    // METAL DETECTION
+    //===========================================================================================================
+    
+    /**
+     * Detect only Metal (standalone)
+     */
+    public static void detectMetalOnly() {
+        synchronized (initLock) {
+            if (metalInitialized) return;
+            detectMetal();
+            metalInitialized = true;
+        }
+    }
+    
+    private static void detectMetal() {
+        try {
+            // Check if running on macOS/iOS
+            String osName = System.getProperty("os.name", "").toLowerCase();
+            String osVersion = System.getProperty("os.version", "");
+            
+            boolean isMacOS = osName.contains("mac") || osName.contains("darwin");
+            boolean isIOS = osName.contains("ios") || osName.contains("iphone") || osName.contains("ipad");
+            
+            if (!isMacOS && !isIOS) {
+                // Check for MoltenVK/MoltenGL translation layers
+                detectMetalTranslation();
+                return;
+            }
+            
+            // Set platform
+            if (isIOS) {
+                if (osName.contains("ipad")) {
+                    Metal.platform = Metal.Platform.IPADOS;
+                } else {
+                    Metal.platform = Metal.Platform.IOS;
+                }
+            } else {
+                Metal.platform = Metal.Platform.MACOS;
+            }
+            Metal.osVersion = osVersion;
+            
+            // Attempt native Metal detection via JNI or framework bridge
+            if (detectMetalNative()) {
+                Metal.isAvailable = true;
+                Metal.isNative = true;
+                setMetalVersionFlags();
+                detectMetalFeatures();
+                detectMetalLimits();
+            } else {
+                // Fallback: estimate based on OS version
+                estimateMetalFromOS(osVersion, isMacOS);
+            }
+            
+        } catch (Throwable t) {
+            // Metal not available or detection failed
+            Metal.isAvailable = false;
+        }
+    }
+    
+    /**
+     * Detect Metal translation layers (MoltenVK, MoltenGL)
+     */
+    private static void detectMetalTranslation() {
+        String renderer = GL.renderer.toLowerCase();
+        String vendor = GL.vendor.toLowerCase();
+        
+        // MoltenVK (Vulkan on Metal)
+        if (renderer.contains("moltenvk") || Vulkan.driverName.toLowerCase().contains("moltenvk")) {
+            Wrapper.type = Wrapper.Type.MVK;
+            Wrapper.name = "MoltenVK";
+            Wrapper.isMetal = true;
+            Wrapper.isMoltenVK = true;
+            Wrapper.isTranslated = true;
+            Metal.isAvailable = true;
+            Metal.isTranslated = true;
+            
+            // MoltenVK reports underlying Metal version
+            estimateMetalFromMoltenVK();
+        }
+        
+        // MoltenGL (OpenGL on Metal)
+        if (renderer.contains("moltengl")) {
+            Wrapper.type = Wrapper.Type.MGL;
+            Wrapper.name = "MoltenGL";
+            Wrapper.isMetal = true;
+            Wrapper.isMoltenGL = true;
+            Wrapper.isTranslated = true;
+            Metal.isAvailable = true;
+            Metal.isTranslated = true;
+        }
+        
+        // Game Porting Toolkit (Apple)
+        if (renderer.contains("gptk") || renderer.contains("game porting toolkit") ||
+            (vendor.contains("apple") && renderer.contains("d3dm"))) {
+            Wrapper.type = Wrapper.Type.GPTK;
+            Wrapper.name = "Game Porting Toolkit";
+            Wrapper.isMetal = true;
+            Wrapper.isTranslated = true;
+            Metal.isAvailable = true;
+            Metal.isTranslated = true;
+        }
+    }
+    
+    /**
+     * Native Metal detection (requires JNI bridge or native code)
+     * Returns false if native detection not available
+     */
+    private static boolean detectMetalNative() {
+        try {
+            // Try to load LWJGL's Metal bindings if available
+            Class<?> mtlClass = Class.forName("org.lwjgl.metal.MTL");
+            // If we get here, LWJGL Metal is available
+            return detectMetalViaLWJGL();
+        } catch (ClassNotFoundException e) {
+            // LWJGL Metal not available, try other methods
+        }
+        
+        try {
+            // Try JNA or other native bridge
+            return detectMetalViaJNA();
+        } catch (Throwable t) {
+            // No native bridge available
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Detect Metal via LWJGL (if available)
+     */
+    private static boolean detectMetalViaLWJGL() {
+        // Placeholder for LWJGL Metal detection
+        // LWJGL doesn't have Metal bindings yet, but this is ready for when it does
+        return false;
+    }
+    
+    /**
+     * Detect Metal via JNA (if available)
+     */
+    private static boolean detectMetalViaJNA() {
+        // Placeholder for JNA-based Metal detection
+        return false;
+    }
+    
+    /**
+     * Estimate Metal version from OS version
+     */
+    private static void estimateMetalFromOS(String osVersion, boolean isMacOS) {
+        try {
+            String[] parts = osVersion.split("\\.");
+            int major = Integer.parseInt(parts[0]);
+            int minor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
+            
+            if (isMacOS) {
+                // macOS version to Metal version mapping
+                if (major >= 15) {           // macOS 15 Sequoia
+                    setMetalVersion(3, 2);
+                } else if (major >= 14) {    // macOS 14 Sonoma
+                    setMetalVersion(3, 1);
+                } else if (major >= 13) {    // macOS 13 Ventura
+                    setMetalVersion(3, 0);
+                } else if (major >= 12) {    // macOS 12 Monterey
+                    setMetalVersion(2, 4);
+                } else if (major >= 11) {    // macOS 11 Big Sur
+                    setMetalVersion(2, 3);
+                } else if (major == 10) {
+                    if (minor >= 15) {       // macOS 10.15 Catalina
+                        setMetalVersion(2, 2);
+                    } else if (minor >= 14) { // macOS 10.14 Mojave
+                        setMetalVersion(2, 1);
+                    } else if (minor >= 13) { // macOS 10.13 High Sierra
+                        setMetalVersion(2, 0);
+                    } else if (minor >= 12) { // macOS 10.12 Sierra
+                        setMetalVersion(1, 2);
+                    } else if (minor >= 11) { // macOS 10.11 El Capitan
+                        setMetalVersion(1, 1);
+                    }
+                }
+            } else {
+                // iOS/iPadOS version to Metal version mapping
+                if (major >= 18) {           // iOS 18
+                    setMetalVersion(3, 2);
+                } else if (major >= 17) {    // iOS 17
+                    setMetalVersion(3, 1);
+                } else if (major >= 16) {    // iOS 16
+                    setMetalVersion(3, 0);
+                } else if (major >= 15) {    // iOS 15
+                    setMetalVersion(2, 4);
+                } else if (major >= 14) {    // iOS 14
+                    setMetalVersion(2, 3);
+                } else if (major >= 13) {    // iOS 13
+                    setMetalVersion(2, 2);
+                } else if (major >= 12) {    // iOS 12
+                    setMetalVersion(2, 1);
+                } else if (major >= 11) {    // iOS 11
+                    setMetalVersion(2, 0);
+                } else if (major >= 10) {    // iOS 10
+                    setMetalVersion(1, 2);
+                } else if (major >= 9) {     // iOS 9
+                    setMetalVersion(1, 1);
+                } else if (major >= 8) {     // iOS 8
+                    setMetalVersion(1, 0);
+                }
+            }
+            
+            if (Metal.majorVersion > 0) {
+                Metal.isAvailable = true;
+                setMetalVersionFlags();
+                estimateMetalFeatures();
+            }
+            
+        } catch (Exception e) {
+            Metal.isAvailable = false;
+        }
+    }
+    
+    private static void setMetalVersion(int major, int minor) {
+        Metal.majorVersion = major;
+        Metal.minorVersion = minor;
+        Metal.mslMajorVersion = major;
+        Metal.mslMinorVersion = minor;
+        Metal.versionString = "Metal " + major + "." + minor;
+    }
+    
+    private static void setMetalVersionFlags() {
+        int ver = Metal.majorVersion * 10 + Metal.minorVersion;
+        Metal.MTL10 = ver >= 10;
+        Metal.MTL11 = ver >= 11;
+        Metal.MTL12 = ver >= 12;
+        Metal.MTL20 = ver >= 20;
+        Metal.MTL21 = ver >= 21;
+        Metal.MTL22 = ver >= 22;
+        Metal.MTL23 = ver >= 23;
+        Metal.MTL24 = ver >= 24;
+        Metal.MTL30 = ver >= 30;
+        Metal.MTL31 = ver >= 31;
+        Metal.MTL32 = ver >= 32;
+        
+        // MSL versions follow Metal versions
+        int mslVer = Metal.mslMajorVersion * 10 + Metal.mslMinorVersion;
+        Metal.MSL_10 = mslVer >= 10;
+        Metal.MSL_11 = mslVer >= 11;
+        Metal.MSL_12 = mslVer >= 12;
+        Metal.MSL_20 = mslVer >= 20;
+        Metal.MSL_21 = mslVer >= 21;
+        Metal.MSL_22 = mslVer >= 22;
+        Metal.MSL_23 = mslVer >= 23;
+        Metal.MSL_24 = mslVer >= 24;
+        Metal.MSL_30 = mslVer >= 30;
+        Metal.MSL_31 = mslVer >= 31;
+        Metal.MSL_32 = mslVer >= 32;
+    }
+    
+    /**
+     * Estimate Metal features based on version
+     */
+    private static void estimateMetalFeatures() {
+        // Metal 1.0 features
+        if (Metal.MTL10) {
+            Metal.hasComputeShaders = true;
+            Metal.hasThreadgroupMemory = true;
+            Metal.hasInstancedDrawing = true;
+            Metal.hasMetalLibrary = true;
+        }
+        
+        // Metal 1.1 features
+        if (Metal.MTL11) {
+            Metal.hasBaseVertex = true;
+            Metal.hasBaseInstance = true;
+        }
+        
+        // Metal 1.2 features
+        if (Metal.MTL12) {
+            Metal.hasDrawIndirect = true;
+            Metal.hasMemoryBarriers = true;
+            Metal.hasSamplerCompare = true;
+        }
+        
+        // Metal 2.0 features
+        if (Metal.MTL20) {
+            Metal.hasArgumentBuffers = true;
+            Metal.argumentBuffersTier = 1;
+            Metal.hasTileShaders = (Metal.platform == Metal.Platform.IOS || Metal.platform == Metal.Platform.IPADOS);
+            Metal.hasImageBlocks = Metal.hasTileShaders;
+            Metal.hasRasterOrderGroups = true;
+            Metal.hasResourceHeaps = true;
+            Metal.hasViewportArrays = true;
+        }
+        
+        // Metal 2.1 features
+        if (Metal.MTL21) {
+            Metal.hasFunctionPointers = true;
+            Metal.hasSharedEvents = true;
+        }
+        
+        // Metal 2.2 features
+        if (Metal.MTL22) {
+            Metal.hasSparseTextures = true;
+            Metal.hasIndirectCommandBuffers = true;
+            Metal.hasSIMDPermute = true;
+            Metal.hasQuadScopedPermute = true;
+        }
+        
+        // Metal 2.3 features
+        if (Metal.MTL23) {
+            Metal.hasSIMDReduction = true;
+            Metal.hasNonUniformThreadgroups = true;
+        }
+        
+        // Metal 2.4 features
+        if (Metal.MTL24) {
+            Metal.argumentBuffersTier = 2;
+        }
+        
+        // Metal 3.0 features
+        if (Metal.MTL30) {
+            Metal.hasRayTracing = true;
+            Metal.hasMeshShaders = true;
+            Metal.hasObjectShaders = true;
+            Metal.hasMeshStage = true;
+            Metal.hasAccelerationStructure = true;
+            Metal.hasBinaryArchive = true;
+            Metal.hasDynamicLibrary = true;
+            Metal.supportedFamilies.add(Metal.GPUFamily.METAL3);
+        }
+        
+        // Metal 3.1 features
+        if (Metal.MTL31) {
+            Metal.hasRayTracingFromRender = true;
+            Metal.hasRayTracingMotionBlur = true;
+        }
+        
+        // Metal 3.2 features
+        if (Metal.MTL32) {
+            Metal.hasPrimitiveMotionBlur = true;
+        }
+        
+        // Estimate GPU family based on platform and version
+        estimateGPUFamily();
+    }
+    
+    private static void estimateGPUFamily() {
+        if (Metal.MTL30) {
+            if (Metal.platform == Metal.Platform.MACOS) {
+                Metal.gpuFamily = Metal.GPUFamily.MAC2;
+                Metal.hasUnifiedMemory = true; // M-series chips
+            } else {
+                Metal.gpuFamily = Metal.GPUFamily.APPLE8;
+            }
+        } else if (Metal.MTL20) {
+            if (Metal.platform == Metal.Platform.MACOS) {
+                Metal.gpuFamily = Metal.GPUFamily.MAC1;
+            } else {
+                Metal.gpuFamily = Metal.GPUFamily.APPLE5;
+            }
+        } else {
+            if (Metal.platform == Metal.Platform.MACOS) {
+                Metal.gpuFamily = Metal.GPUFamily.MAC1;
+            } else {
+                Metal.gpuFamily = Metal.GPUFamily.APPLE3;
+            }
+        }
+        
+        Metal.supportedFamilies.add(Metal.gpuFamily);
+    }
+    
+    /**
+     * Detect Metal features (when native access is available)
+     */
+    private static void detectMetalFeatures() {
+        // Would be populated by native Metal queries
+        // For now, defer to estimation
+        estimateMetalFeatures();
+    }
+    
+    /**
+     * Detect Metal limits (when native access is available)
+     */
+    private static void detectMetalLimits() {
+        // Default reasonable limits for Apple hardware
+        if (Metal.MTL30) {
+            Metal.maxTextureSize2D = 16384;
+            Metal.maxTextureSizeCube = 16384;
+            Metal.maxTextureSize3D = 2048;
+            Metal.maxTextureArrayLayers = 2048;
+            Metal.maxColorRenderTargets = 8;
+            Metal.maxFragmentInputs = 128;
+            Metal.maxVertexAttributes = 31;
+            Metal.maxThreadgroupMemorySize = 32768;
+            Metal.maxTotalThreadsPerThreadgroup = 1024;
+            Metal.maxSamplerStates = 16384;
+            Metal.maxAnisotropy = 16;
+            Metal.maxBufferLength = 1024L * 1024L * 1024L; // 1GB
+            Metal.maxSIMDWidth = 32;
+        } else if (Metal.MTL20) {
+            Metal.maxTextureSize2D = 16384;
+            Metal.maxTextureSizeCube = 16384;
+            Metal.maxTextureSize3D = 2048;
+            Metal.maxTextureArrayLayers = 2048;
+            Metal.maxColorRenderTargets = 8;
+            Metal.maxFragmentInputs = 124;
+            Metal.maxVertexAttributes = 31;
+            Metal.maxThreadgroupMemorySize = 16384;
+            Metal.maxTotalThreadsPerThreadgroup = 1024;
+            Metal.maxSamplerStates = 2048;
+            Metal.maxAnisotropy = 16;
+            Metal.maxBufferLength = 256L * 1024L * 1024L; // 256MB
+            Metal.maxSIMDWidth = 32;
+        } else {
+            Metal.maxTextureSize2D = 8192;
+            Metal.maxTextureSizeCube = 8192;
+            Metal.maxTextureSize3D = 2048;
+            Metal.maxTextureArrayLayers = 2048;
+            Metal.maxColorRenderTargets = 4;
+            Metal.maxFragmentInputs = 60;
+            Metal.maxVertexAttributes = 31;
+            Metal.maxThreadgroupMemorySize = 16384;
+            Metal.maxTotalThreadsPerThreadgroup = 512;
+            Metal.maxSamplerStates = 2048;
+            Metal.maxAnisotropy = 16;
+            Metal.maxBufferLength = 256L * 1024L * 1024L;
+            Metal.maxSIMDWidth = 32;
+        }
+    }
+    
+    /**
+     * Estimate Metal version from MoltenVK
+     */
+    private static void estimateMetalFromMoltenVK() {
+        // MoltenVK typically targets Metal 2.x+
+        // Use Vulkan version as hint
+        if (Vulkan.VK13) {
+            setMetalVersion(3, 0);
+        } else if (Vulkan.VK12) {
+            setMetalVersion(2, 3);
+        } else if (Vulkan.VK11) {
+            setMetalVersion(2, 1);
+        } else {
+            setMetalVersion(2, 0);
+        }
+        setMetalVersionFlags();
+        estimateMetalFeatures();
+    }
     
     //===========================================================================================================
     // FEATURE RESOLUTION - Combines user config with detected capabilities
@@ -2094,6 +3003,20 @@ public class UniversalCapabilities {
             SPIRV.hasInt64 = GLSL.hasInt64;
             SPIRV.hasFloat16 = GLSL.hasFloat16;
             SPIRV.hasInt8 = GLSL.hasInt8;
+        }
+
+        // Metal-specific features
+        if (Metal.isAvailable) {
+            Features.metalArgumentBuffers = resolveFeature(config.useArgumentBuffers, 
+                Metal.hasArgumentBuffers, true);
+            Features.metalICB = resolveFeature(config.useICB, 
+                Metal.hasIndirectCommandBuffers, true);
+            Features.metalTileShaders = Metal.hasTileShaders;
+            Features.metalMeshShaders = resolveFeature(config.useMetalMeshShaders, 
+                Metal.hasMeshShaders, true);
+            Features.metalRayTracing = resolveFeature(config.useMetalRayTracing, 
+                Metal.hasRayTracing, true);
+            Features.metalMemorylessTargets = Metal.hasMemorylessRenderTargets;
         }
         
         // Apply render tier restrictions
@@ -2355,6 +3278,64 @@ public class UniversalCapabilities {
         Vulkan.deviceLocalMemoryBytes = 0;
         Vulkan.hostVisibleMemoryBytes = 0;
         Vulkan.hostCoherentMemoryBytes = 0;
+
+        // Clear Metal flags
+        Metal.MTL10 = Metal.MTL11 = Metal.MTL12 = false;
+        Metal.MTL20 = Metal.MTL21 = Metal.MTL22 = Metal.MTL23 = Metal.MTL24 = false;
+        Metal.MTL30 = Metal.MTL31 = Metal.MTL32 = false;
+        Metal.MSL_10 = Metal.MSL_11 = Metal.MSL_12 = false;
+        Metal.MSL_20 = Metal.MSL_21 = Metal.MSL_22 = Metal.MSL_23 = Metal.MSL_24 = false;
+        Metal.MSL_30 = Metal.MSL_31 = Metal.MSL_32 = false;
+        Metal.isAvailable = false;
+        Metal.isNative = false;
+        Metal.isTranslated = false;
+        Metal.majorVersion = 0;
+        Metal.minorVersion = 0;
+        Metal.patchVersion = 0;
+        Metal.versionString = "";
+        Metal.deviceName = "";
+        Metal.registryID = "";
+        Metal.vendorID = 0;
+        Metal.deviceID = 0;
+        Metal.isLowPower = false;
+        Metal.isHeadless = false;
+        Metal.isRemovable = false;
+        Metal.hasUnifiedMemory = false;
+        Metal.gpuFamily = Metal.GPUFamily.UNKNOWN;
+        Metal.supportedFamilies.clear();
+        Metal.highestFeatureSet = Metal.FeatureSet.UNKNOWN;
+        Metal.supportedFeatureSets.clear();
+        Metal.platform = Metal.Platform.UNKNOWN;
+        Metal.osVersion = "";
+        Metal.mslMajorVersion = 0;
+        Metal.mslMinorVersion = 0;
+        Metal.mslPatchVersion = 0;
+        Metal.extensions.clear();
+        Metal.extensionCount = 0;
+        // Clear all feature flags
+        Metal.hasMetalLibrary = Metal.hasDynamicLibrary = Metal.hasBinaryArchive = false;
+        Metal.hasArgumentBuffers = false;
+        Metal.argumentBuffersTier = 0;
+        Metal.hasRayTracing = Metal.hasMeshShaders = Metal.hasComputeShaders = false;
+        Metal.hasIndirectCommandBuffers = Metal.hasTileShaders = Metal.hasImageBlocks = false;
+        Metal.hasSparseTextures = Metal.hasRasterOrderGroups = Metal.hasResourceHeaps = false;
+        // Clear all limits
+        Metal.maxTextureSize2D = Metal.maxTextureSizeCube = Metal.maxTextureSize3D = 0;
+        Metal.maxTextureArrayLayers = Metal.maxColorRenderTargets = 0;
+        Metal.maxThreadgroupMemorySize = Metal.maxTotalThreadsPerThreadgroup = 0;
+        Metal.maxSamplerStates = 0;
+        Metal.maxAnisotropy = 0;
+        Metal.maxBufferLength = 0;
+        
+        // Clear wrapper Metal flags
+        Wrapper.isMetal = false;
+        Wrapper.isMoltenVK = false;
+        Wrapper.isMoltenGL = false;
+        
+        // Clear Features Metal flags
+        Features.metalArgumentBuffers = Features.metalICB = false;
+        Features.metalTileShaders = Features.metalMeshShaders = false;
+        Features.metalRayTracing = Features.metalMemorylessTargets = false;
         
         // Clear wrapper state
         Wrapper.type = Wrapper.Type.NATIVE;
@@ -2569,6 +3550,42 @@ public class UniversalCapabilities {
                 result.addWarning("OpenGL ES context - desktop GL features may be unavailable");
             }
         }
+
+        // Check Metal if preferred
+        if (config.preferredAPI == Config.PreferredAPI.METAL) {
+            if (!Metal.isAvailable) {
+                result.addError("Metal is required but not available (not on Apple platform)");
+            } else {
+                int minMetal = config.minMetalMajor * 10 + config.minMetalMinor;
+                int currentMetal = Metal.getVersionInt();
+                if (currentMetal < minMetal) {
+                    result.addError(String.format("Metal %d.%d required, but only %d.%d available",
+                        config.minMetalMajor, config.minMetalMinor, 
+                        Metal.majorVersion, Metal.minorVersion));
+                }
+            }
+        }
+        
+        // Metal feature validation
+        if (Metal.isAvailable) {
+            validateRequiredFeature(result, "Metal Ray Tracing", config.useMetalRayTracing, 
+                Features.metalRayTracing);
+            validateRequiredFeature(result, "Metal Mesh Shaders", config.useMetalMeshShaders, 
+                Features.metalMeshShaders);
+            validateRequiredFeature(result, "Argument Buffers", config.useArgumentBuffers, 
+                Features.metalArgumentBuffers);
+            validateRequiredFeature(result, "Indirect Command Buffers", config.useICB, 
+                Features.metalICB);
+            
+            if (Metal.isTranslated) {
+                result.addWarning("Running on Metal translation layer (" + Wrapper.name + 
+                    ") - some features may have overhead");
+            }
+            
+            if (Metal.isAppleSilicon()) {
+                result.addRecommendation("Apple Silicon detected - unified memory architecture available");
+            }
+        }
         
         // Performance recommendations
         if (!Features.VAO && GL.GL30) {
@@ -2742,6 +3759,45 @@ public class UniversalCapabilities {
         sb.append("  1.6: ").append(yn(SPIRV.SPIRV_16)).append(padRight("", 6)).append("│\n");
         sb.append("└─────────────────────────────────────────────────────────────────────────────┘\n\n");
         
+
+        // Metal
+        sb.append("┌─────────────────────────────────────────────────────────────────────────────┐\n");
+        sb.append("│ METAL SUPPORT                                                               │\n");
+        sb.append("├─────────────────────────────────────────────────────────────────────────────┤\n");
+        if (Metal.isAvailable) {
+            sb.append("│ Available: Yes  Version: ").append(Metal.majorVersion).append(".").append(Metal.minorVersion);
+            sb.append("  MSL: ").append(Metal.mslMajorVersion).append(".").append(Metal.mslMinorVersion);
+            sb.append("  Platform: ").append(Metal.getPlatformName());
+            sb.append(padRight("", 17)).append("│\n");
+            sb.append("│ 1.0:").append(yn(Metal.MTL10)).append(" 1.1:").append(yn(Metal.MTL11));
+            sb.append(" 1.2:").append(yn(Metal.MTL12)).append(" 2.0:").append(yn(Metal.MTL20));
+            sb.append(" 2.1:").append(yn(Metal.MTL21)).append(" 2.2:").append(yn(Metal.MTL22));
+            sb.append(" 2.3:").append(yn(Metal.MTL23)).append(" 2.4:").append(yn(Metal.MTL24));
+            sb.append(padRight("", 5)).append("│\n");
+            sb.append("│ 3.0:").append(yn(Metal.MTL30)).append(" 3.1:").append(yn(Metal.MTL31));
+            sb.append(" 3.2:").append(yn(Metal.MTL32));
+            sb.append(padRight("", 51)).append("│\n");
+            if (!Metal.deviceName.isEmpty()) {
+                sb.append("│ Device: ").append(padRight(Metal.deviceName, 67)).append("│\n");
+            }
+            sb.append("│ GPU Family: ").append(padRight(Metal.getGPUFamilyName(), 63)).append("│\n");
+            if (Metal.isAppleSilicon()) {
+                sb.append("│ Apple Silicon: Yes (Unified Memory)").append(padRight("", 40)).append("│\n");
+            }
+            if (Metal.isTranslated) {
+                sb.append("│ Translation Layer: ").append(padRight(Wrapper.name, 55)).append("│\n");
+            }
+            sb.append("│ Features: ArgumentBufs:").append(yn(Metal.hasArgumentBuffers));
+            sb.append(" RayTrace:").append(yn(Metal.hasRayTracing));
+            sb.append(" Mesh:").append(yn(Metal.hasMeshShaders));
+            sb.append(" ICB:").append(yn(Metal.hasIndirectCommandBuffers));
+            sb.append(" Tile:").append(yn(Metal.hasTileShaders));
+            sb.append(padRight("", 8)).append("│\n");
+        } else {
+            sb.append("│ Available: No").append(padRight("", 62)).append("│\n");
+        }
+        sb.append("└─────────────────────────────────────────────────────────────────────────────┘\n\n");
+
         // Vulkan
         sb.append("┌─────────────────────────────────────────────────────────────────────────────┐\n");
         sb.append("│ VULKAN SUPPORT                                                              │\n");
@@ -2946,6 +4002,30 @@ public class UniversalCapabilities {
         sb.append("    \"deviceName\": \"").append(Vulkan.deviceName.replace("\"", "\\\"")).append("\",\n");
         sb.append("    \"deviceType\": \"").append(Vulkan.getDeviceTypeName()).append("\"\n");
         sb.append("  },\n");
+
+        // Metal
+        sb.append("  \"metal\": {\n");
+        sb.append("    \"available\": ").append(Metal.isAvailable).append(",\n");
+        sb.append("    \"major\": ").append(Metal.majorVersion).append(",\n");
+        sb.append("    \"minor\": ").append(Metal.minorVersion).append(",\n");
+        sb.append("    \"mslMajor\": ").append(Metal.mslMajorVersion).append(",\n");
+        sb.append("    \"mslMinor\": ").append(Metal.mslMinorVersion).append(",\n");
+        sb.append("    \"platform\": \"").append(Metal.getPlatformName()).append("\",\n");
+        sb.append("    \"gpuFamily\": \"").append(Metal.getGPUFamilyName()).append("\",\n");
+        sb.append("    \"deviceName\": \"").append(Metal.deviceName.replace("\"", "\\\"")).append("\",\n");
+        sb.append("    \"isNative\": ").append(Metal.isNative).append(",\n");
+        sb.append("    \"isTranslated\": ").append(Metal.isTranslated).append(",\n");
+        sb.append("    \"isAppleSilicon\": ").append(Metal.isAppleSilicon()).append(",\n");
+        sb.append("    \"hasUnifiedMemory\": ").append(Metal.hasUnifiedMemory).append(",\n");
+        sb.append("    \"hasArgumentBuffers\": ").append(Metal.hasArgumentBuffers).append(",\n");
+        sb.append("    \"hasRayTracing\": ").append(Metal.hasRayTracing).append(",\n");
+        sb.append("    \"hasMeshShaders\": ").append(Metal.hasMeshShaders).append(",\n");
+        sb.append("    \"hasIndirectCommandBuffers\": ").append(Metal.hasIndirectCommandBuffers).append(",\n");
+        sb.append("    \"hasTileShaders\": ").append(Metal.hasTileShaders).append(",\n");
+        sb.append("    \"hasComputeShaders\": ").append(Metal.hasComputeShaders).append(",\n");
+        sb.append("    \"maxTextureSize2D\": ").append(Metal.maxTextureSize2D).append(",\n");
+        sb.append("    \"maxBufferLength\": ").append(Metal.maxBufferLength).append("\n");
+        sb.append("  },\n");
         
         // Wrapper
         sb.append("  \"wrapper\": {\n");
@@ -3028,20 +4108,34 @@ public class UniversalCapabilities {
                 
             case OPENGL:
                 return Config.PreferredAPI.OPENGL;
+
+            case METAL:
+                if (Metal.isAvailable) return Config.PreferredAPI.METAL;
+                if (config.allowFallback) {
+                    if (Vulkan.isAvailable) return Config.PreferredAPI.VULKAN;
+                    return Config.PreferredAPI.OPENGL;
+                }
+                return Config.PreferredAPI.METAL; // Will fail
                 
             case AUTO:
             default:
+                // On Apple platforms, prefer Metal
+                if (Metal.isAvailable && Metal.isNative && Metal.MTL20) {
+                    return Config.PreferredAPI.METAL;
+                }
                 // Prefer Vulkan if available and modern enough
                 if (Vulkan.isAvailable && Vulkan.VK11) {
                     return Config.PreferredAPI.VULKAN;
+                }
+                // Check for OpenGL ES (mobile/embedded)
+                if (GL.isES && GL.ES30) {
+                    return Config.PreferredAPI.OPENGL_ES;
                 }
                 // Otherwise use OpenGL
                 if (GL.isCoreProfile) {
                     return Config.PreferredAPI.OPENGL_CORE;
                 }
                 return Config.PreferredAPI.OPENGL;
-        }
-    }
     
     /**
      * Get recommended render tier based on hardware
@@ -3104,6 +4198,46 @@ public class UniversalCapabilities {
         if (GL.GL12) return 12;
         if (GL.GL11) return 11;
         return 10;
+    }
+
+    /**
+     * Get the maximum supported Metal version
+     */
+    public static int getMaxSupportedMetalVersion() {
+        if (!initialized) detect();
+        return Metal.getVersionInt();
+    }
+    
+    /**
+     * Get the maximum supported MSL version
+     */
+    public static int getMaxSupportedMSLVersion() {
+        if (!initialized) detect();
+        return Metal.getMSLVersionInt();
+    }
+    
+    /**
+     * Check if Metal is available and usable
+     */
+    public static boolean isMetalAvailable() {
+        if (!initialized) detect();
+        return Metal.isAvailable;
+    }
+    
+    /**
+     * Check if running on Apple Silicon
+     */
+    public static boolean isAppleSilicon() {
+        if (!initialized) detect();
+        return Metal.isAppleSilicon();
+    }
+    
+    /**
+     * Check if running on native Metal (not translated)
+     */
+    public static boolean isNativeMetal() {
+        if (!initialized) detect();
+        return Metal.isAvailable && Metal.isNative && !Metal.isTranslated;
     }
     
     /**
