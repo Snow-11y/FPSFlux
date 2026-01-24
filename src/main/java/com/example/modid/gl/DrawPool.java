@@ -1568,6 +1568,269 @@ public final class DrawPool implements JITHelper.DrawPool, AutoCloseable {
         return changes;
     }
 
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// ██ SECTION 14.5: SIMD-ACCELERATED SORTING (FIX)
+// ════════════════════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Sorts commands to minimize state changes using SIMD acceleration.
+ */
+private void sortCommands(FrameState frame) {
+    long startTime = System.nanoTime();
+
+    List<DrawCommand> commands = frame.pendingCommands;
+    int size = commands.size();
+
+    if (size < 2) return;
+
+    // Separate opaque and transparent
+    List<DrawCommand> opaque = new ArrayList<>(size);
+    List<DrawCommand> transparent = new ArrayList<>();
+
+    for (DrawCommand cmd : commands) {
+        if (cmd.state().blendMode() == BlendMode.OPAQUE ||
+            cmd.state().blendMode() == BlendMode.ALPHA_TEST) {
+            opaque.add(cmd);
+        } else {
+            transparent.add(cmd);
+        }
+    }
+
+    // SIMD-accelerated sort for opaque draws
+    if (opaque.size() > 1) {
+        sortWithSIMD(opaque);
+    }
+
+    // Sort transparent back-to-front (required for correct blending)
+    if (transparent.size() > 1) {
+        transparent.sort(Comparator
+            .comparing((DrawCommand c) -> c.state().sortKey())
+            .thenComparingDouble(c -> -c.depthSortKey()));
+    }
+
+    // Combine sorted lists
+    commands.clear();
+    commands.addAll(opaque);
+    commands.addAll(transparent);
+
+    // Calculate state changes saved
+    int stateChanges = calculateStateChanges(commands);
+    frame.stateChangeCount.set(stateChanges);
+
+    long elapsed = System.nanoTime() - startTime;
+    frame.sortTimeNanos.add(elapsed);
+}
+
+/**
+ * SIMD-accelerated sorting using precomputed sort keys.
+ */
+private void sortWithSIMD(List<DrawCommand> commands) {
+    int size = commands.size();
+    
+    // Compute all sort keys using SIMD
+    long[] sortKeys = computeSortKeysSIMD(commands);
+    
+    // Build index array for indirect sorting
+    Integer[] indices = new Integer[size];
+    for (int i = 0; i < size; i++) {
+        indices[i] = i;
+    }
+    
+    // Sort indices by their corresponding sort keys
+    Arrays.sort(indices, (a, b) -> Long.compare(sortKeys[a], sortKeys[b]));
+    
+    // Reorder commands based on sorted indices
+    List<DrawCommand> sorted = new ArrayList<>(size);
+    for (int idx : indices) {
+        sorted.add(commands.get(idx));
+    }
+    
+    // Replace original list contents
+    commands.clear();
+    commands.addAll(sorted);
+}
+
+/**
+ * SIMD-accelerated sort key computation for multiple commands.
+ * Now actually USED by sortWithSIMD().
+ */
+private long[] computeSortKeysSIMD(List<DrawCommand> commands) {
+    int size = commands.size();
+    long[] sortKeys = new long[size];
+
+    // SIMD-accelerated key computation
+    int i = 0;
+    int bound = LONG_VECTOR_LENGTH > 0 ? LONG_SPECIES.loopBound(size) : 0;
+
+    // Process in SIMD chunks where possible
+    if (bound > 0 && LONG_VECTOR_LENGTH >= 4) {
+        for (; i < bound; i += LONG_VECTOR_LENGTH) {
+            // Extract fields into arrays for vectorization
+            long[] framebuffers = new long[LONG_VECTOR_LENGTH];
+            long[] shaders = new long[LONG_VECTOR_LENGTH];
+            long[] blendModes = new long[LONG_VECTOR_LENGTH];
+            long[] vaos = new long[LONG_VECTOR_LENGTH];
+            long[] depths = new long[LONG_VECTOR_LENGTH];
+
+            int remaining = Math.min(LONG_VECTOR_LENGTH, size - i);
+            for (int j = 0; j < remaining; j++) {
+                DrawCommand cmd = commands.get(i + j);
+                framebuffers[j] = cmd.state().framebufferId();
+                shaders[j] = cmd.state().shaderProgramId();
+                blendModes[j] = cmd.state().blendMode().ordinal();
+                vaos[j] = cmd.state().vaoId();
+                
+                // Encode depth settings
+                int depthBits = (cmd.state().depthWrite() ? 1 : 0) 
+                              | (cmd.state().depthTest() ? 2 : 0) 
+                              | ((cmd.state().depthFunc() & 0x7) << 2);
+                depths[j] = depthBits;
+            }
+
+            // Vectorized bit packing
+            // sortKey = (framebuffer << 48) | (shader << 32) | (blend << 28) | (vao << 12) | (depth << 8)
+            LongVector vFramebuffers = LongVector.fromArray(LONG_SPECIES, framebuffers, 0);
+            LongVector vShaders = LongVector.fromArray(LONG_SPECIES, shaders, 0);
+            LongVector vBlendModes = LongVector.fromArray(LONG_SPECIES, blendModes, 0);
+            LongVector vVaos = LongVector.fromArray(LONG_SPECIES, vaos, 0);
+            LongVector vDepths = LongVector.fromArray(LONG_SPECIES, depths, 0);
+
+            // Compute sort key using vector operations
+            LongVector result = vFramebuffers
+                .lanewise(VectorOperators.AND, 0xFFFFL)
+                .lanewise(VectorOperators.LSHL, 48)
+                .or(vShaders.lanewise(VectorOperators.AND, 0xFFFFL).lanewise(VectorOperators.LSHL, 32))
+                .or(vBlendModes.lanewise(VectorOperators.AND, 0xFL).lanewise(VectorOperators.LSHL, 28))
+                .or(vVaos.lanewise(VectorOperators.AND, 0xFFFFL).lanewise(VectorOperators.LSHL, 12))
+                .or(vDepths.lanewise(VectorOperators.AND, 0xFFL).lanewise(VectorOperators.LSHL, 8));
+
+            // Store results
+            result.intoArray(sortKeys, i);
+            
+            // Zero out padding if we didn't fill the vector
+            for (int j = remaining; j < LONG_VECTOR_LENGTH && i + j < size; j++) {
+                sortKeys[i + j] = 0;
+            }
+        }
+    }
+
+    // Scalar fallback for remainder
+    for (; i < size; i++) {
+        sortKeys[i] = commands.get(i).state().sortKey();
+    }
+
+    return sortKeys;
+}
+
+/**
+ * Alternative: Radix sort optimized for sort keys.
+ * Use this for very large command lists (10K+).
+ */
+private void radixSortBySortKey(List<DrawCommand> commands) {
+    int size = commands.size();
+    if (size < 2) return;
+    
+    // Compute sort keys
+    long[] sortKeys = computeSortKeysSIMD(commands);
+    
+    // Create temp arrays
+    DrawCommand[] cmdArray = commands.toArray(new DrawCommand[0]);
+    DrawCommand[] temp = new DrawCommand[size];
+    long[] tempKeys = new long[size];
+    
+    // Radix sort on 8-bit chunks (8 passes for 64-bit keys)
+    for (int shift = 0; shift < 64; shift += 8) {
+        int[] count = new int[256];
+        
+        // Count occurrences
+        for (int i = 0; i < size; i++) {
+            int bucket = (int)((sortKeys[i] >>> shift) & 0xFF);
+            count[bucket]++;
+        }
+        
+        // Compute prefix sums
+        for (int i = 1; i < 256; i++) {
+            count[i] += count[i - 1];
+        }
+        
+        // Place elements in sorted order (backwards to maintain stability)
+        for (int i = size - 1; i >= 0; i--) {
+            int bucket = (int)((sortKeys[i] >>> shift) & 0xFF);
+            int pos = --count[bucket];
+            temp[pos] = cmdArray[i];
+            tempKeys[pos] = sortKeys[i];
+        }
+        
+        // Swap arrays
+        DrawCommand[] tmpCmd = cmdArray;
+        cmdArray = temp;
+        temp = tmpCmd;
+        
+        long[] tmpKey = sortKeys;
+        sortKeys = tempKeys;
+        tempKeys = tmpKey;
+    }
+    
+    // Copy back to original list
+    commands.clear();
+    commands.addAll(Arrays.asList(cmdArray));
+}
+
+/**
+ * Decides which sort algorithm to use based on size and characteristics.
+ */
+private void sortCommandsOptimal(FrameState frame) {
+    long startTime = System.nanoTime();
+    
+    List<DrawCommand> commands = frame.pendingCommands;
+    int size = commands.size();
+    
+    if (size < 2) return;
+    
+    // Separate opaque and transparent
+    List<DrawCommand> opaque = new ArrayList<>(size);
+    List<DrawCommand> transparent = new ArrayList<>();
+    
+    for (DrawCommand cmd : commands) {
+        if (cmd.state().blendMode() == BlendMode.OPAQUE ||
+            cmd.state().blendMode() == BlendMode.ALPHA_TEST) {
+            opaque.add(cmd);
+        } else {
+            transparent.add(cmd);
+        }
+    }
+    
+    // Choose algorithm based on size
+    if (opaque.size() > 10000) {
+        // Use radix sort for very large lists
+        radixSortBySortKey(opaque);
+    } else if (opaque.size() > 100) {
+        // Use SIMD-accelerated comparison sort for medium lists
+        sortWithSIMD(opaque);
+    } else {
+        // Use standard sort for small lists (overhead not worth it)
+        opaque.sort(Comparator.comparingLong(c -> c.state().sortKey()));
+    }
+    
+    // Always use standard sort for transparent (usually small)
+    if (transparent.size() > 1) {
+        transparent.sort(Comparator
+            .comparing((DrawCommand c) -> c.state().sortKey())
+            .thenComparingDouble(c -> -c.depthSortKey()));
+    }
+    
+    // Combine
+    commands.clear();
+    commands.addAll(opaque);
+    commands.addAll(transparent);
+    
+    int stateChanges = calculateStateChanges(commands);
+    frame.stateChangeCount.set(stateChanges);
+    
+    long elapsed = System.nanoTime() - startTime;
+    frame.sortTimeNanos.add(elapsed);
+}
+
     // ════════════════════════════════════════════════════════════════════════════════════════════
     // ██ SECTION 15: FLUSH & EXECUTION
     // ════════════════════════════════════════════════════════════════════════════════════════════
