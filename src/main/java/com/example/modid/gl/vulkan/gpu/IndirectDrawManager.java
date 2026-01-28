@@ -1763,3 +1763,5 @@ public final class IndirectDrawManager {
         meshConfigs = new MeshLODConfig[MAX_MESH_TYPES];
     }
 }
+
+// ...kirino is a failure tho~!
