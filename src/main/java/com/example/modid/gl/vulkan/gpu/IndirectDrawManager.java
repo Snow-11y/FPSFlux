@@ -24,14 +24,14 @@ import java.util.concurrent.locks.StampedLock;
  * - Visibility buffer support
  * - Proper synchronization barriers
  * - Debug statistics and validation
- * 
+ *
  * PERF OPTIMIZATIONS:
  * - Lock-free instance allocation with CAS retry
  * - Per-frame resource isolation (no GPU/CPU sync stalls)
  * - Batch updates with dirty region tracking
  * - Staging buffer ring for async DMA transfers
- * - Cache-line aligned data structures
- * - SIMD-friendly memory layout (SoA where beneficial)
+ * - Cache-line aligned data structures (actually cachefriendly)
+ * - SIMD-friendly memory layout (SoA where actually beneficial...huh Kirino?)
  * - Async statistics readback (N-2 frame latency)
  * - Persistent mapped buffers with manual flush
  * - Sparse bitset for enabled instance tracking
